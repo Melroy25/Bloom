@@ -244,7 +244,7 @@ export default function HealZoneScreen() {
               backgroundColor={features.games.backgroundColor}
               iconBgColor="rgba(90, 78, 128, 0.12)"
               iconColor={features.games.color}
-              onPress={() => setSelectedFeature(features.games)}
+              onPress={() => router.push({ pathname: '/games', params: { from: '/heal-zone' } })}
             />
 
             {/* CARD 4 — MUSIC */}
@@ -255,7 +255,7 @@ export default function HealZoneScreen() {
               backgroundColor={features.music.backgroundColor}
               iconBgColor="rgba(46, 90, 112, 0.12)"
               iconColor={features.music.color}
-              onPress={() => setSelectedFeature(features.music)}
+              onPress={() => router.push({ pathname: '/music', params: { from: '/heal-zone' } })}
             />
           </View>
         </View>
