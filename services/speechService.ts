@@ -157,7 +157,7 @@ class SpeechService {
             this.isCurrentlySpeaking = false;
             onDone?.();
           },
-          onError: (err) => {
+          onError: (err: any) => {
             console.warn('[BLOOM Speech] Native speech error:', err);
             this.isCurrentlySpeaking = false;
             onError?.(err);
