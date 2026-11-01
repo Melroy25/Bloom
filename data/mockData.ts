@@ -143,3 +143,43 @@ export const aiCompanion = {
     { id: '3', sender: 'ai', text: "That's completely normal. Let's break it down together. What's the biggest exam you're worried about?" },
   ],
 };
+
+// Heal Zone Mood System
+export const moodOptions = [
+  { id: '1', name: 'Happy' as const, emoji: '😊', score: 4.0, color: '#6AAF7D', bgColor: '#E8F5E9' },
+  { id: '2', name: 'Excited' as const, emoji: '🤩', score: 4.0, color: '#E8B86D', bgColor: '#FFF8E1' },
+  { id: '3', name: 'Calm' as const, emoji: '😌', score: 3.5, color: '#789B83', bgColor: '#E8F1E8' },
+  { id: '4', name: 'Neutral' as const, emoji: '😐', score: 2.5, color: '#7B857F', bgColor: '#F0F2F1' },
+  { id: '5', name: 'Tired' as const, emoji: '🥱', score: 2.0, color: '#9FA8DA', bgColor: '#EDE7F6' },
+  { id: '6', name: 'Anxious' as const, emoji: '😰', score: 1.8, color: '#E57373', bgColor: '#FFEBEE' },
+  { id: '7', name: 'Sad' as const, emoji: '😔', score: 1.2, color: '#64B5F6', bgColor: '#E3F2FD' },
+  { id: '8', name: 'Stressed' as const, emoji: '😫', score: 1.0, color: '#FF8A65', bgColor: '#FBE9E7' },
+];
+
+export const initialMoodHistory = [
+  { id: 'm1', mood: 'Calm' as const, emoji: '😌', score: 3.5, date: 'Today', time: '08:45 AM', timestamp: Date.now() },
+  { id: 'm2', mood: 'Happy' as const, emoji: '😊', score: 4.0, date: 'Yesterday', time: '07:15 PM', timestamp: Date.now() - 86400000 },
+  { id: 'm3', mood: 'Excited' as const, emoji: '🤩', score: 4.0, date: '2 days ago', time: '02:30 PM', timestamp: Date.now() - 172800000 },
+  { id: 'm4', mood: 'Tired' as const, emoji: '🥱', score: 2.0, date: '3 days ago', time: '10:10 PM', timestamp: Date.now() - 259200000 },
+  { id: 'm5', mood: 'Calm' as const, emoji: '😌', score: 3.5, date: '4 days ago', time: '09:00 AM', timestamp: Date.now() - 345600000 },
+  { id: 'm6', mood: 'Neutral' as const, emoji: '😐', score: 2.5, date: '5 days ago', time: '04:20 PM', timestamp: Date.now() - 432000000 },
+];
+
+export const initial7DayChart = [
+  { label: 'Mon', score: 2.5, mood: 'Neutral', emoji: '😐' },
+  { label: 'Tue', score: 3.5, mood: 'Calm', emoji: '😌' },
+  { label: 'Wed', score: 2.0, mood: 'Tired', emoji: '🥱' },
+  { label: 'Thu', score: 4.0, mood: 'Excited', emoji: '🤩' },
+  { label: 'Fri', score: 3.5, mood: 'Calm', emoji: '😌' },
+  { label: 'Sat', score: 4.0, mood: 'Happy', emoji: '😊' },
+  { label: 'Sun', score: 3.5, mood: 'Calm', emoji: '😌' },
+];
+
+export const initial30DayChart = [
+  { label: 'W1', score: 2.8, mood: 'Neutral', emoji: '😐' },
+  { label: 'W2', score: 3.4, mood: 'Calm', emoji: '😌' },
+  { label: 'W3', score: 2.6, mood: 'Neutral', emoji: '😐' },
+  { label: 'W4', score: 3.8, mood: 'Happy', emoji: '😊' },
+  { label: 'Now', score: 3.5, mood: 'Calm', emoji: '😌' },
+];
+

@@ -54,3 +54,40 @@ export interface CollabItem {
   color: string;
   members?: number;
 }
+
+export type MoodType =
+  | 'Happy'
+  | 'Excited'
+  | 'Calm'
+  | 'Neutral'
+  | 'Tired'
+  | 'Anxious'
+  | 'Sad'
+  | 'Stressed';
+
+export interface MoodOption {
+  id: string;
+  name: MoodType;
+  emoji: string;
+  score: number;
+  color: string;
+  bgColor: string;
+}
+
+export interface MoodEntry {
+  id: string;
+  mood: MoodType;
+  emoji: string;
+  score: number;
+  date: string;
+  time: string;
+  timestamp: number;
+}
+
+export interface MoodChartPoint {
+  label: string;
+  score: number;
+  mood: string;
+  emoji: string;
+}
+

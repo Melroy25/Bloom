@@ -1,23 +1,185 @@
-import React from 'react';
-import { View, Text, ScrollView, StyleSheet, TouchableOpacity, Platform } from 'react-native';
+import React, { useState, useCallback } from 'react';
+import {
+  View,
+  Text,
+  ScrollView,
+  StyleSheet,
+  Platform,
+  Animated,
+} from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Wind, Music, BookOpen, Smile, Gamepad2, Leaf, Heart } from 'lucide-react-native';
+import {
+  Wind,
+  BookOpen,
+  Gamepad2,
+  Music,
+  Leaf,
+  CheckCircle2,
+} from 'lucide-react-native';
 import { Colors } from '../../constants/colors';
 import { Typography } from '../../constants/typography';
 import { Spacing, BorderRadius } from '../../constants/spacing';
 import { Shadows } from '../../constants/shadows';
-
-const healItems = [
-  { id: '1', title: 'Healing Bubble', description: 'Breathe, relax, and find your calm space', Icon: Wind, color: Colors.mint },
-  { id: '2', title: 'Music Zone', description: 'Curated playlists for focus and relaxation', Icon: Music, color: Colors.lavender },
-  { id: '3', title: 'Journal', description: 'Express your thoughts freely', Icon: BookOpen, color: Colors.peach },
-  { id: '4', title: 'Mood Tracking', description: 'Track and understand your emotions', Icon: Smile, color: Colors.lightSage },
-  { id: '5', title: 'Healing Games', description: 'Mindful games to destress', Icon: Gamepad2, color: Colors.paleBlue },
-];
+import { HealFeatureCard } from '../../components/heal-zone/HealFeatureCard';
+import { CurrentMoodCard } from '../../components/heal-zone/CurrentMoodCard';
+import { MoodSelectorModal } from '../../components/heal-zone/MoodSelectorModal';
+import { MoodHistorySection } from '../../components/heal-zone/MoodHistorySection';
+import { MoodTrendChart } from '../../components/heal-zone/MoodTrendChart';
+import {
+  FeatureDetailModal,
+  FeatureDetail,
+} from '../../components/heal-zone/FeatureDetailModal';
+import {
+  initialMoodHistory,
+  initial7DayChart,
+  initial30DayChart,
+} from '../../data/mockData';
+import { MoodEntry, MoodOption, MoodChartPoint } from '../../types';
 
 export default function HealZoneScreen() {
   const insets = useSafeAreaInsets();
   const topPadding = Math.max(insets.top, Platform.OS === 'android' ? 24 : 16);
+
+  // Current mood state
+  const [currentMood, setCurrentMood] = useState<{
+    name: string;
+    emoji: string;
+    timeText: string;
+  }>({
+    name: 'Calm',
+    emoji: '😌',
+    timeText: 'Today, 8:45 AM',
+  });
+
+  // Mood history state
+  const [history, setHistory] = useState<MoodEntry[]>(initialMoodHistory);
+
+  // Mood chart data state
+  const [sevenDayChart, setSevenDayChart] =
+    useState<MoodChartPoint[]>(initial7DayChart);
+  const [thirtyDayChart, setThirtyDayChart] =
+    useState<MoodChartPoint[]>(initial30DayChart);
+
+  // Modals state
+  const [moodModalVisible, setMoodModalVisible] = useState(false);
+  const [selectedFeature, setSelectedFeature] = useState<FeatureDetail | null>(
+    null
+  );
+
+  // Toast confirmation state
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  // Feature cards data definition
+  const features: Record<string, FeatureDetail> = {
+    bubble: {
+      title: 'Heal Bubble',
+      subtitle: 'Breathe, relax and find your calm.',
+      Icon: Wind,
+      color: Colors.primaryDark,
+      backgroundColor: Colors.lightSage,
+      description:
+        'Take a 3-minute guided pause to align your breath with soothing visual rhythms and release nervous tension.',
+      tags: ['4-7-8 Breathing', 'Box Breathing', 'Deep Calming'],
+      actionLabel: 'Begin Breathing Exercise',
+    },
+    documents: {
+      title: 'Documents',
+      subtitle: 'Your personal space to write.',
+      Icon: BookOpen,
+      color: '#7D5B3C',
+      backgroundColor: Colors.peach,
+      description:
+        'A private, distraction-free sanctuary for journaling, gratitude reflections, exam thoughts, and daily notes.',
+      tags: ['Daily Journal', 'Gratitude Prompts', 'Study Notes'],
+      actionLabel: 'Open Journal Canvas',
+    },
+    games: {
+      title: 'Games',
+      subtitle: 'Relax, play and refresh your mind.',
+      Icon: Gamepad2,
+      color: '#5A4E80',
+      backgroundColor: Colors.lavender,
+      description:
+        'Mindful mini-games designed to gently de-stress, stimulate gentle creativity, and reset your mind between study blocks.',
+      tags: ['Zen Garden', 'Color Flow', 'Mindful Blocks'],
+      actionLabel: 'Play Quick Game',
+    },
+    music: {
+      title: 'Music',
+      subtitle: 'Find your calm through music.',
+      Icon: Music,
+      color: '#2E5A70',
+      backgroundColor: Colors.softBlue,
+      description:
+        'Curated ambient audio, nature frequencies, binaural focus beats, and soothing acoustic melodies.',
+      tags: ['Gentle Rain', 'Forest Ambience', 'Lo-Fi Chill'],
+      actionLabel: 'Play Soundscape',
+    },
+  };
+
+  // Handle Mood selection
+  const handleSelectMood = useCallback((option: MoodOption) => {
+    const now = new Date();
+    const timeFormatted = now.toLocaleTimeString([], {
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+
+    // 1. Update Current Mood
+    setCurrentMood({
+      name: option.name,
+      emoji: option.emoji,
+      timeText: `Today, ${timeFormatted}`,
+    });
+
+    // 2. Add to Local Mood History (prepended)
+    const newEntry: MoodEntry = {
+      id: `m-${Date.now()}`,
+      mood: option.name,
+      emoji: option.emoji,
+      score: option.score,
+      date: 'Today',
+      time: timeFormatted,
+      timestamp: Date.now(),
+    };
+
+    setHistory(prev => [newEntry, ...prev]);
+
+    // 3. Update 7-day and 30-day chart data with new reading
+    setSevenDayChart(prev => {
+      const updated = [...prev];
+      if (updated.length > 0) {
+        // Update today's score
+        updated[updated.length - 1] = {
+          ...updated[updated.length - 1],
+          score: option.score,
+          mood: option.name,
+          emoji: option.emoji,
+        };
+      }
+      return updated;
+    });
+
+    setThirtyDayChart(prev => {
+      const updated = [...prev];
+      if (updated.length > 0) {
+        updated[updated.length - 1] = {
+          ...updated[updated.length - 1],
+          score: option.score,
+          mood: option.name,
+          emoji: option.emoji,
+        };
+      }
+      return updated;
+    });
+
+    // 4. Close modal and show confirmation toast
+    setMoodModalVisible(false);
+    setToastMessage(`Mood logged: ${option.name} ${option.emoji}`);
+    setTimeout(() => {
+      setToastMessage(null);
+    }, 3200);
+  }, []);
 
   return (
     <View style={styles.screen}>
@@ -26,50 +188,111 @@ export default function HealZoneScreen() {
         contentContainerStyle={[styles.scrollContent, { paddingTop: topPadding }]}
         showsVerticalScrollIndicator={false}
       >
-        {/* Header */}
+        {/* SECTION 1 — HEADER */}
         <View style={styles.header}>
-          <View style={styles.headerIcon}>
-            <Heart size={24} color={Colors.primary} strokeWidth={1.5} />
+          <View style={styles.headerTopBadge}>
+            <Leaf size={14} color={Colors.primary} strokeWidth={2} />
+            <Text style={styles.headerBadgeText}>SANCTUARY & WELLNESS</Text>
           </View>
           <Text style={styles.headerTitle}>Heal Zone</Text>
-          <Text style={styles.headerSubtitle}>Your safe space for healing and self-care</Text>
+          <Text style={styles.headerSubtitle}>
+            Your safe space for healing and self-care.
+          </Text>
         </View>
 
-        {/* Wellness Banner */}
-        <View style={[styles.banner, Shadows.sm]}>
-          <View style={styles.bannerContent}>
-            <Leaf size={28} color={Colors.primary} strokeWidth={1.5} />
-            <View style={styles.bannerText}>
-              <Text style={styles.bannerTitle}>Take a moment for yourself</Text>
-              <Text style={styles.bannerDesc}>Choose an activity that brings you peace</Text>
-            </View>
+        {/* Confirmation Toast */}
+        {toastMessage && (
+          <View style={[styles.toastContainer, Shadows.md]}>
+            <CheckCircle2 size={18} color={Colors.primaryDark} strokeWidth={2} />
+            <Text style={styles.toastText}>{toastMessage}</Text>
+          </View>
+        )}
+
+        {/* SECTION 2 — FOUR FEATURE CARDS (2x2 GRID) */}
+        <View style={styles.gridSection}>
+          <View style={styles.gridRow}>
+            {/* CARD 1 — HEAL BUBBLE */}
+            <HealFeatureCard
+              title={features.bubble.title}
+              subtitle={features.bubble.subtitle}
+              Icon={features.bubble.Icon}
+              backgroundColor={features.bubble.backgroundColor}
+              iconBgColor="rgba(54, 91, 69, 0.12)"
+              iconColor={features.bubble.color}
+              onPress={() => setSelectedFeature(features.bubble)}
+            />
+
+            {/* CARD 2 — DOCUMENTS */}
+            <HealFeatureCard
+              title={features.documents.title}
+              subtitle={features.documents.subtitle}
+              Icon={features.documents.Icon}
+              backgroundColor={features.documents.backgroundColor}
+              iconBgColor="rgba(125, 91, 60, 0.12)"
+              iconColor={features.documents.color}
+              onPress={() => setSelectedFeature(features.documents)}
+            />
+          </View>
+
+          <View style={styles.gridRow}>
+            {/* CARD 3 — GAMES */}
+            <HealFeatureCard
+              title={features.games.title}
+              subtitle={features.games.subtitle}
+              Icon={features.games.Icon}
+              backgroundColor={features.games.backgroundColor}
+              iconBgColor="rgba(90, 78, 128, 0.12)"
+              iconColor={features.games.color}
+              onPress={() => setSelectedFeature(features.games)}
+            />
+
+            {/* CARD 4 — MUSIC */}
+            <HealFeatureCard
+              title={features.music.title}
+              subtitle={features.music.subtitle}
+              Icon={features.music.Icon}
+              backgroundColor={features.music.backgroundColor}
+              iconBgColor="rgba(46, 90, 112, 0.12)"
+              iconColor={features.music.color}
+              onPress={() => setSelectedFeature(features.music)}
+            />
           </View>
         </View>
 
-        {/* Activity Cards */}
-        {healItems.map((item) => (
-          <TouchableOpacity key={item.id} style={[styles.card, Shadows.sm]} activeOpacity={0.7}>
-            <View style={[styles.cardIcon, { backgroundColor: item.color }]}>
-              <item.Icon size={24} color={Colors.primaryDark} strokeWidth={1.5} />
-            </View>
-            <View style={styles.cardContent}>
-              <Text style={styles.cardTitle}>{item.title}</Text>
-              <Text style={styles.cardDesc}>{item.description}</Text>
-            </View>
-            <View style={styles.cardArrow}>
-              <Text style={styles.arrowText}>›</Text>
-            </View>
-          </TouchableOpacity>
-        ))}
+        {/* SECTION 3 — CURRENT MOOD / LOG MOOD */}
+        <CurrentMoodCard
+          moodEmoji={currentMood.emoji}
+          moodName={currentMood.name}
+          lastLoggedTime={currentMood.timeText}
+          onLogMoodPress={() => setMoodModalVisible(true)}
+        />
 
-        {/* Coming Soon Note */}
-        <View style={styles.comingSoon}>
-          <Leaf size={16} color={Colors.primary} strokeWidth={1.5} style={{ opacity: 0.5 }} />
-          <Text style={styles.comingSoonText}>Full features coming soon</Text>
-        </View>
+        {/* SECTION 4 — RECENT MOOD HISTORY */}
+        <MoodHistorySection entries={history} />
 
-        <View style={{ height: 100 }} />
+        {/* SECTION 5 — MOOD ANALYTICS GRAPH */}
+        <MoodTrendChart
+          sevenDayData={sevenDayChart}
+          thirtyDayData={thirtyDayChart}
+        />
+
+        {/* Bottom spacing to ensure content doesn't collide with the fixed navigation bar */}
+        <View style={{ height: 110 }} />
       </ScrollView>
+
+      {/* Mood Selector Modal */}
+      <MoodSelectorModal
+        visible={moodModalVisible}
+        onClose={() => setMoodModalVisible(false)}
+        onSelectMood={handleSelectMood}
+      />
+
+      {/* Feature Detail Modal */}
+      <FeatureDetailModal
+        visible={!!selectedFeature}
+        feature={selectedFeature}
+        onClose={() => setSelectedFeature(null)}
+      />
     </View>
   );
 }
@@ -83,108 +306,60 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   scrollContent: {
-    paddingTop: Spacing.xl,
+    paddingBottom: Spacing.massive,
   },
   header: {
-    alignItems: 'center',
     paddingHorizontal: Spacing.xl,
-    paddingTop: Spacing.lg,
-    paddingBottom: Spacing.xxl,
+    paddingTop: Spacing.sm,
+    paddingBottom: Spacing.lg,
   },
-  headerIcon: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    backgroundColor: Colors.lightSage,
-    justifyContent: 'center',
+  headerTopBadge: {
+    flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: Spacing.md,
+    gap: 6,
+    marginBottom: Spacing.xs,
+  },
+  headerBadgeText: {
+    ...Typography.label,
+    color: Colors.primaryDark,
+    fontSize: 10,
+    letterSpacing: 0.8,
   },
   headerTitle: {
     ...Typography.h1,
-    marginBottom: Spacing.xs,
+    fontSize: 30,
+    color: Colors.darkText,
+    marginBottom: 4,
   },
   headerSubtitle: {
     ...Typography.body,
+    fontSize: 15,
     color: Colors.mutedText,
-    textAlign: 'center',
   },
-  banner: {
-    marginHorizontal: Spacing.xl,
+  toastContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
     backgroundColor: Colors.lightSage,
-    borderRadius: BorderRadius.xl,
-    padding: Spacing.xl,
-    marginBottom: Spacing.xxl,
-  },
-  bannerContent: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  bannerText: {
-    marginLeft: Spacing.lg,
-    flex: 1,
-  },
-  bannerTitle: {
-    ...Typography.body,
-    fontWeight: '600',
-    color: Colors.primaryDark,
-  },
-  bannerDesc: {
-    ...Typography.caption,
-    color: Colors.mutedText,
-    marginTop: 2,
-  },
-  card: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: Colors.white,
     marginHorizontal: Spacing.xl,
-    marginBottom: Spacing.md,
+    paddingHorizontal: Spacing.lg,
+    paddingVertical: Spacing.md,
     borderRadius: BorderRadius.lg,
-    padding: Spacing.lg,
-  },
-  cardIcon: {
-    width: 48,
-    height: 48,
-    borderRadius: BorderRadius.md,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  cardContent: {
-    flex: 1,
-    marginLeft: Spacing.lg,
-  },
-  cardTitle: {
-    ...Typography.body,
-    fontWeight: '600',
-  },
-  cardDesc: {
-    ...Typography.caption,
-    marginTop: 2,
-  },
-  cardArrow: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    backgroundColor: Colors.cream,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  arrowText: {
-    fontSize: 18,
-    color: Colors.primary,
-    fontWeight: '600',
-  },
-  comingSoon: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingVertical: Spacing.xl,
+    borderWidth: 1,
+    borderColor: Colors.primaryLight,
+    marginBottom: Spacing.lg,
     gap: 8,
   },
-  comingSoonText: {
-    ...Typography.caption,
-    color: Colors.mutedText,
-    fontStyle: 'italic',
+  toastText: {
+    ...Typography.bodySmall,
+    fontWeight: '700',
+    color: Colors.primaryDark,
+  },
+  gridSection: {
+    paddingHorizontal: Spacing.xl,
+    marginBottom: Spacing.lg,
+  },
+  gridRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
   },
 });

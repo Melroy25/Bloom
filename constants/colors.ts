@@ -10,6 +10,7 @@ export const Colors = {
   peach: '#F7E5DA',
   lavender: '#EAE5F4',
   paleBlue: '#E0EAF5',
+  softBlue: '#E2EDF3',
   darkText: '#29332E',
   mutedText: '#7B857F',
   lightText: '#A5AEA8',
