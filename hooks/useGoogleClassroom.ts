@@ -7,6 +7,7 @@ import { Alert, Platform } from 'react-native';
 WebBrowser.maybeCompleteAuthSession();
 
 export const GOOGLE_CLIENT_ID = '523986274065-qndn5e3k3qlthc7n5a6lqu1rq8pu5p94.apps.googleusercontent.com';
+export const EXPO_PROXY_REDIRECT_URI = 'https://auth.expo.io/@anonymous/bloom';
 
 export interface ClassroomAssignmentItem {
   id: string;
@@ -25,13 +26,14 @@ export function useGoogleClassroom(onSyncSuccess?: (tasks: ClassroomAssignmentIt
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // 1. Google useAuthRequest configuration with webClientId and explicit useProxy: true
+  // 1. Google useAuthRequest configuration with webClientId and HTTPS proxy redirect URI
   const [request, response, promptAsync] = Google.useAuthRequest(
     {
       webClientId: GOOGLE_CLIENT_ID,
       clientId: GOOGLE_CLIENT_ID,
       androidClientId: GOOGLE_CLIENT_ID,
       iosClientId: GOOGLE_CLIENT_ID,
+      redirectUri: Platform.OS === 'web' ? undefined : EXPO_PROXY_REDIRECT_URI,
       scopes: [
         'https://www.googleapis.com/auth/classroom.courses.readonly',
         'https://www.googleapis.com/auth/classroom.course-work.readonly',
@@ -216,3 +218,4 @@ export function useGoogleClassroom(onSyncSuccess?: (tasks: ClassroomAssignmentIt
     isReady: !!request,
   };
 }
+
