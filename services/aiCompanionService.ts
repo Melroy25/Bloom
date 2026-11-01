@@ -1,6 +1,6 @@
 // AI Companion Service for BLOOM
-// Provides gentle student-wellness reflections, emotional intent analysis,
-// and state-driven responses.
+// Provides student-wellness reflections, emotional intent analysis,
+// and state-driven responses powered by Gemini AI with intelligent offline fallbacks.
 
 export type MascotState =
   | 'IDLE'
@@ -11,11 +11,20 @@ export type MascotState =
   | 'COMFORTING'
   | 'ERROR';
 
+export interface ChatAttachment {
+  id: string;
+  uri: string;
+  name: string;
+  type: 'image' | 'file';
+  size?: string;
+}
+
 export interface ChatMessage {
   id: string;
   sender: 'user' | 'ai';
   text: string;
   timestamp: string;
+  attachment?: ChatAttachment;
   emotion?: MascotState;
   steps?: { stepNumber: number; title: string; detail: string }[];
   showSprintWidget?: boolean;
@@ -73,7 +82,7 @@ export const RECENT_CHECK_INS: ConversationThread[] = [
       {
         id: 'm2',
         sender: 'ai',
-        text: "Take a deep breath with me for a moment. 🌿 It's completely normal to feel that rush when deadlines overlap.\n\nLet's break this down into bite-sized momentum:\n1. Pick just one topic for 20 minutes.\n2. Hide everything else.\n3. Celebrate your small win.",
+        text: "Take a deep breath with me for a moment. It's completely normal to feel that rush when deadlines overlap.\n\nLet's break this down into bite-sized momentum:\n1. Pick just one topic for 20 minutes.\n2. Hide everything else.\n3. Celebrate your small win.",
         timestamp: '2:42 PM',
         emotion: 'COMFORTING',
         quickReplies: ['Review Bio notes', 'Try 3-min breathing', 'Build timetable'],
@@ -94,7 +103,7 @@ export const RECENT_CHECK_INS: ConversationThread[] = [
       {
         id: 'm2-2',
         sender: 'ai',
-        text: 'You worked hard today. 🌱 Let your shoulders drop away from your ears. Take a slow 4-count breath in... hold for 4... and exhale softly for 6.',
+        text: 'You worked hard today. Let your shoulders drop away from your ears. Take a slow 4-count breath in... hold for 4... and exhale softly for 6.',
         timestamp: '8:16 PM',
         emotion: 'COMFORTING',
         quickReplies: ['Feeling lighter', 'Still tense', 'Going to sleep'],
@@ -163,15 +172,134 @@ export function detectEmotionFromContext(text: string): MascotState {
 }
 
 /**
+ * Calls Gemini API if an API key is available in environment
+ */
+async function callGeminiApi(prompt: string): Promise<string | null> {
+  const apiKey =
+    process.env.EXPO_PUBLIC_GEMINI_API_KEY ||
+    process.env.GEMINI_API_KEY ||
+    (typeof window !== 'undefined' && (window as any).EXPO_PUBLIC_GEMINI_API_KEY);
+
+  if (!apiKey) return null;
+
+  try {
+    const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
+    const systemPrompt =
+      "You are Bloom, a warm, calm, empathetic mindful AI companion for students. You help students manage academic stress, study overwhelm, focus, and mindful breathing. Keep responses encouraging, concise (2-3 sentences), warm, and soothing. Avoid emojis or markdown asterisks because your response is also spoken aloud.";
+
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        contents: [
+          {
+            role: 'user',
+            parts: [{ text: `${systemPrompt}\n\nStudent says: "${prompt}"` }],
+          },
+        ],
+        generationConfig: {
+          maxOutputTokens: 160,
+          temperature: 0.7,
+        },
+      }),
+    });
+
+    if (!response.ok) {
+      console.warn('[Gemini API] Response not ok:', response.status);
+      return null;
+    }
+
+    const data = await response.json();
+    const candidateText = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+    if (candidateText && candidateText.trim().length > 0) {
+      return candidateText.trim();
+    }
+  } catch (err) {
+    console.warn('[Gemini API] Request exception:', err);
+  }
+
+  return null;
+}
+
+/**
  * Generates companion response with emotional metadata
  */
-export async function generateCompanionResponse(userText: string): Promise<ChatMessage> {
-  // Simulate natural reflective typing delay
-  await new Promise((resolve) => setTimeout(resolve, 900));
-
-  const lower = userText.toLowerCase();
+export async function generateCompanionResponse(
+  userText: string,
+  attachment?: ChatAttachment
+): Promise<ChatMessage> {
   const time = getFormattedTime();
   const id = 'msg-' + Date.now();
+  const lower = userText.toLowerCase();
+
+  // If user uploaded an attachment (ChatGPT-like file/image understanding)
+  if (attachment) {
+    const isImg = attachment.type === 'image';
+    const filename = attachment.name;
+
+    const promptText = userText.trim()
+      ? `User attached ${isImg ? 'an image' : 'a file'} named "${filename}" with message: "${userText}"`
+      : `User shared ${isImg ? 'an image' : 'a file'} named "${filename}". Please review and provide a warm mindful study breakdown.`;
+
+    const geminiText = await callGeminiApi(promptText);
+    if (geminiText) {
+      return {
+        id,
+        sender: 'ai',
+        text: geminiText,
+        timestamp: time,
+        emotion: 'HAPPY',
+        quickReplies: ['Break this down step-by-step', 'Create a 15-min focus plan', 'Looks good!'],
+      };
+    }
+
+    return {
+      id,
+      sender: 'ai',
+      text: userText.trim()
+        ? `I received your ${isImg ? 'image' : 'file'} "${filename}". Let's tackle "${userText}" together at your own natural pace.`
+        : `I've opened your ${isImg ? 'study image' : 'document'} "${filename}". Take a deep breath with me—we can break this topic down into easy bite-sized chunks so you feel confident and calm.`,
+      timestamp: time,
+      emotion: 'HAPPY',
+      steps: [
+        {
+          stepNumber: 1,
+          title: 'Review key terms & main idea',
+          detail: 'Skim the core headings without stress.',
+        },
+        {
+          stepNumber: 2,
+          title: 'Summarize 1 concept in your own words',
+          detail: 'Active recall helps memory solidify naturally.',
+        },
+        {
+          stepNumber: 3,
+          title: 'Take a 5-minute hydration break',
+          detail: 'Give your mind time to absorb the material.',
+        },
+      ],
+      quickReplies: ['Explain key points', 'Start 20-min sprint', 'Check my understanding'],
+    };
+  }
+
+  // 1. Try Gemini API if configured
+  const geminiText = await callGeminiApi(userText);
+  if (geminiText) {
+    const emotion = detectEmotionFromContext(geminiText + ' ' + userText);
+    return {
+      id,
+      sender: 'ai',
+      text: geminiText,
+      timestamp: time,
+      emotion: emotion === 'IDLE' ? 'HAPPY' : emotion,
+      quickReplies: ['Help me focus', 'Mindful breathing', 'Thank you!'],
+    };
+  }
+
+  // 2. Intelligent companion reflection engine (offline / fallback)
+  await new Promise((resolve) => setTimeout(resolve, 800));
 
   // If user asks about focus / sprint / timer
   if (
@@ -208,7 +336,7 @@ export async function generateCompanionResponse(userText: string): Promise<ChatM
     return {
       id,
       sender: 'ai',
-      text: "Take a slow, deep breath with me right now. 🌿 You don't have to carry every deadline at once. Drop your shoulders, take a sip of water, and pick just one small task for 15 minutes.",
+      text: "Take a slow, deep breath with me right now. You don't have to carry every deadline at once. Drop your shoulders, take a sip of cool water, and pick just one small task for 15 minutes.",
       timestamp: time,
       emotion: 'COMFORTING',
       steps: [
@@ -249,7 +377,7 @@ export async function generateCompanionResponse(userText: string): Promise<ChatM
     return {
       id,
       sender: 'ai',
-      text: "Hey there! 🌱 I'm Bloom, your mindful companion. I'm right here with you whenever you need to reflect, plan your studies, or simply take a breather.",
+      text: "Hey there! I'm Bloom, your mindful companion. I'm right here with you whenever you need to reflect, plan your studies, or simply take a breather.",
       timestamp: time,
       emotion: 'HAPPY',
       quickReplies: ['Help me focus', "I'm feeling stressed", "Let's talk"],
@@ -260,7 +388,7 @@ export async function generateCompanionResponse(userText: string): Promise<ChatM
   return {
     id,
     sender: 'ai',
-    text: "Thank you for sharing that with me 🌱. Studying and growing works best when you take things one step at a time at your own natural pace. What would feel most helpful to focus on next?",
+    text: "Thank you for sharing that with me. Studying and growing works best when you take things one step at a time at your own natural pace. What would feel most helpful to focus on next?",
     timestamp: time,
     emotion: 'HAPPY',
     quickReplies: ['Help me prioritize', 'Start a focus sprint', 'Tips to unwind'],

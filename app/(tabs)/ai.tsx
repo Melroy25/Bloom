@@ -6,17 +6,16 @@ import {
   ScrollView,
   TextInput,
   TouchableOpacity,
-  Pressable,
   Animated,
   KeyboardAvoidingView,
   Platform,
   Dimensions,
   Modal,
+  Image,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   Menu,
-  RotateCcw,
   Send,
   Mic,
   MicOff,
@@ -24,19 +23,28 @@ import {
   VolumeX,
   Sparkles,
   Radio,
+  MessageSquare,
   X,
   ArrowRight,
   Play,
   Square,
   AlertCircle,
+  Plus,
+  Paperclip,
+  FileText,
+  Image as ImageIcon,
 } from 'lucide-react-native';
 import { Colors } from '../../constants/colors';
 import { Typography } from '../../constants/typography';
+import { Shadows } from '../../constants/shadows';
 import {
   MascotState,
+  ChatMessage,
+  ChatAttachment,
   ConversationThread,
+  RECENT_CHECK_INS,
   generateCompanionResponse,
-  detectEmotionFromContext,
+  getFormattedTime,
 } from '../../services/aiCompanionService';
 import { speechService } from '../../services/speechService';
 import { AnimatedMascot } from '../../components/ai/AnimatedMascot';
@@ -54,24 +62,45 @@ const SAMPLE_VOICE_PROMPTS = [
 export default function AICompanionScreen() {
   const insets = useSafeAreaInsets();
 
-  // State
+  // Mode state: 'VOICE' = Bot speaking audio with prominent mascot; 'CHAT' = pure text chat stream
+  const [companionMode, setCompanionMode] = useState<'VOICE' | 'CHAT'>('VOICE');
+
+  // Voice Mode state
   const [mascotState, setMascotState] = useState<MascotState>('IDLE');
-  const [isVoiceMode, setIsVoiceMode] = useState<boolean>(true); // Voice spoken output toggle
+  const [isVoiceMode, setIsVoiceMode] = useState<boolean>(true); // Audio playback toggle
   const [isListening, setIsListening] = useState<boolean>(false);
-  const [inputText, setInputText] = useState<string>('');
-  const [recentUserQuery, setRecentUserQuery] = useState<string | null>(null);
-  const [activeResponseText, setActiveResponseText] = useState<string | null>(null);
+  const [voiceQuery, setVoiceQuery] = useState<string | null>(null);
+  const [voiceResponseText, setVoiceResponseText] = useState<string | null>(null);
   const [speechError, setSpeechError] = useState<string | null>(null);
+
+  // Chat Mode state (threads and message stream)
+  const [threads, setThreads] = useState<ConversationThread[]>(RECENT_CHECK_INS);
+  const [activeThreadId, setActiveThreadId] = useState<string>('checkin-1');
+  const [isChatTyping, setIsChatTyping] = useState<boolean>(false);
+  const chatScrollRef = useRef<any>(null);
+
+  // Input & Attachment state (ChatGPT-like file/image upload)
+  const [inputText, setInputText] = useState<string>('');
+  const [selectedAttachment, setSelectedAttachment] = useState<ChatAttachment | null>(null);
+  const [attachModalVisible, setAttachModalVisible] = useState<boolean>(false);
 
   // Sidebar
   const [sidebarOpen, setSidebarOpen] = useState<boolean>(false);
-  const [activeThreadId, setActiveThreadId] = useState<string | undefined>(undefined);
 
-  // Mobile voice modal (fallback for Expo Go when Web Speech API is absent)
+  // Mobile voice modal (fallback for Expo Go)
   const [mobileVoiceModalVisible, setMobileVoiceModalVisible] = useState<boolean>(false);
   const [voiceWaveAnim] = useState(new Animated.Value(0.3));
 
-  // Stop speech if screen unmounts
+  // Current active thread object for Chat mode
+  const currentThread =
+    threads.find((t) => t.id === activeThreadId) || threads[0] || {
+      id: 'default',
+      title: 'Mindful Chat',
+      lastUpdated: 'Just now',
+      messages: [],
+    };
+
+  // Cleanup on unmount
   useEffect(() => {
     return () => {
       speechService.stopSpeaking();
@@ -79,7 +108,7 @@ export default function AICompanionScreen() {
     };
   }, []);
 
-  // Voice wave animation for listening modal
+  // Voice wave loop
   useEffect(() => {
     if (isListening || mobileVoiceModalVisible) {
       const loop = Animated.loop(
@@ -101,51 +130,201 @@ export default function AICompanionScreen() {
     }
   }, [isListening, mobileVoiceModalVisible, voiceWaveAnim]);
 
-  // Main processing pipeline for user input
-  const processMessage = async (text: string) => {
-    const trimmed = text.trim();
-    if (!trimmed) return;
+  // Scroll to bottom when new messages arrive in Chat mode
+  useEffect(() => {
+    if (companionMode === 'CHAT') {
+      setTimeout(() => {
+        chatScrollRef.current?.scrollToEnd({ animated: true });
+      }, 120);
+    }
+  }, [currentThread.messages, companionMode]);
 
-    // Unlock browser audio policy immediately on user gesture
+  // -------------------------------------------------------------
+  // File & Image Picker (ChatGPT style: Web file picker & presets)
+  // -------------------------------------------------------------
+  const handlePickAttachment = () => {
+    if (Platform.OS === 'web' && typeof document !== 'undefined') {
+      const input = document.createElement('input');
+      input.type = 'file';
+      input.accept = 'image/*,.pdf,.doc,.docx,.txt';
+      input.onchange = (e: any) => {
+        const file = e.target.files?.[0];
+        if (file) {
+          const isImage = file.type.startsWith('image/');
+          const reader = new FileReader();
+          reader.onload = (event) => {
+            const uri = event.target?.result as string;
+            const sizeStr =
+              file.size > 1024 * 1024
+                ? `${(file.size / (1024 * 1024)).toFixed(1)} MB`
+                : `${Math.round(file.size / 1024)} KB`;
+
+            setSelectedAttachment({
+              id: 'att-' + Date.now(),
+              uri,
+              name: file.name,
+              type: isImage ? 'image' : 'file',
+              size: sizeStr,
+            });
+          };
+          reader.readAsDataURL(file);
+        }
+      };
+      input.click();
+    } else {
+      setAttachModalVisible(true);
+    }
+  };
+
+  const handleSelectSampleAttachment = (type: 'image' | 'file') => {
+    if (type === 'image') {
+      setSelectedAttachment({
+        id: 'sample-img-' + Date.now(),
+        uri: 'https://images.unsplash.com/photo-1532094349884-543bc11b234d?w=600&auto=format&fit=crop&q=80',
+        name: 'study-notes-diagram.png',
+        type: 'image',
+        size: '340 KB',
+      });
+    } else {
+      setSelectedAttachment({
+        id: 'sample-doc-' + Date.now(),
+        uri: 'file://sample-study-notes.pdf',
+        name: 'exam-study-summary.pdf',
+        type: 'file',
+        size: '1.2 MB',
+      });
+    }
+    setAttachModalVisible(false);
+  };
+
+  // -------------------------------------------------------------
+  // VOICE MODE PIPELINE: The bot speaks with real voice audio
+  // -------------------------------------------------------------
+  const processVoiceMessage = async (text: string, customAttachment?: ChatAttachment | null) => {
+    const trimmed = text.trim();
+    const attachment = customAttachment !== undefined ? customAttachment : selectedAttachment;
+    if (!trimmed && !attachment) return;
+
     speechService.unlockAudio();
     await speechService.stopSpeaking();
 
-    setRecentUserQuery(trimmed);
+    const queryDesc = trimmed || (attachment ? `Shared ${attachment.name}` : '');
+    setVoiceQuery(queryDesc);
+    setSelectedAttachment(null);
     setInputText('');
     setSpeechError(null);
-
-    // Emotional reaction & Thinking state
-    const targetEmotion = detectEmotionFromContext(trimmed);
     setMascotState('THINKING');
 
     try {
-      const response = await generateCompanionResponse(trimmed);
-      setActiveResponseText(response.text);
+      const response = await generateCompanionResponse(trimmed, attachment || undefined);
+      setVoiceResponseText(response.text);
 
       if (isVoiceMode) {
-        setMascotState('SPEAKING');
-
         await speechService.speak(
           response.text,
           () => {
             setMascotState('SPEAKING');
           },
           () => {
-            setMascotState(response.emotion === 'COMFORTING' ? 'COMFORTING' : 'IDLE');
+            setMascotState('HAPPY');
+            setTimeout(() => setMascotState('IDLE'), 2200);
           },
           (err) => {
             console.warn('[AI Screen] Speech playback note:', err);
-            setMascotState(response.emotion || 'IDLE');
+            setMascotState('HAPPY');
+            setTimeout(() => setMascotState('IDLE'), 1800);
             setSpeechError('Audio tap required by browser. Tap replay.');
           }
         );
       } else {
-        // Voice mode off
-        setMascotState(response.emotion || 'IDLE');
+        setMascotState('HAPPY');
+        setTimeout(() => setMascotState('IDLE'), 2200);
       }
     } catch {
-      setActiveResponseText("I'm right here with you 🌱. Take a gentle breath and let's take this one step at a time.");
+      setVoiceResponseText("I'm right here with you. Take a gentle breath and let's take this one step at a time.");
       setMascotState('COMFORTING');
+      setTimeout(() => setMascotState('IDLE'), 3200);
+    }
+  };
+
+  // -------------------------------------------------------------
+  // CHAT MODE PIPELINE: Pure text chat stream (quiet, no audio voice)
+  // -------------------------------------------------------------
+  const processChatMessage = async (text: string, customAttachment?: ChatAttachment | null) => {
+    const trimmed = text.trim();
+    const attachment = customAttachment !== undefined ? customAttachment : selectedAttachment;
+    if (!trimmed && !attachment) return;
+
+    const time = getFormattedTime();
+    const userMsg: ChatMessage = {
+      id: 'user-' + Date.now(),
+      sender: 'user',
+      text: trimmed,
+      attachment: attachment || undefined,
+      timestamp: time,
+    };
+
+    // Append user message immediately
+    setThreads((prevThreads) =>
+      prevThreads.map((t) => {
+        if (t.id === currentThread.id) {
+          return {
+            ...t,
+            lastUpdated: 'Just now',
+            messages: [...t.messages, userMsg],
+          };
+        }
+        return t;
+      })
+    );
+
+    setSelectedAttachment(null);
+    setInputText('');
+    setIsChatTyping(true);
+
+    try {
+      const aiResponse = await generateCompanionResponse(trimmed, attachment || undefined);
+      setThreads((prevThreads) =>
+        prevThreads.map((t) => {
+          if (t.id === currentThread.id) {
+            return {
+              ...t,
+              lastUpdated: 'Just now',
+              messages: [...t.messages, aiResponse],
+            };
+          }
+          return t;
+        })
+      );
+    } catch {
+      const fallbackMsg: ChatMessage = {
+        id: 'ai-' + Date.now(),
+        sender: 'ai',
+        text: "I'm right here with you. Take a slow, gentle breath and let's take this one step at a time.",
+        timestamp: time,
+      };
+      setThreads((prevThreads) =>
+        prevThreads.map((t) => {
+          if (t.id === currentThread.id) {
+            return {
+              ...t,
+              messages: [...t.messages, fallbackMsg],
+            };
+          }
+          return t;
+        })
+      );
+    } finally {
+      setIsChatTyping(false);
+    }
+  };
+
+  // Dispatch message based on active mode
+  const handleSendMessage = (text: string) => {
+    if (companionMode === 'VOICE') {
+      processVoiceMessage(text);
+    } else {
+      processChatMessage(text);
     }
   };
 
@@ -172,7 +351,7 @@ export default function AICompanionScreen() {
       onResult: (transcript: string) => {
         setIsListening(false);
         if (transcript.trim()) {
-          processMessage(transcript);
+          handleSendMessage(transcript);
         } else {
           setMascotState('IDLE');
         }
@@ -198,80 +377,83 @@ export default function AICompanionScreen() {
     }
   };
 
-  // Replay speech audio
+  // Replay speech audio (Voice Mode)
   const handleReplaySpeech = async () => {
-    if (!activeResponseText) return;
+    if (!voiceResponseText) return;
     speechService.unlockAudio();
-    setMascotState('SPEAKING');
     setSpeechError(null);
 
     await speechService.speak(
-      activeResponseText,
+      voiceResponseText,
       () => setMascotState('SPEAKING'),
-      () => setMascotState('IDLE'),
-      (err) => {
+      () => {
+        setMascotState('HAPPY');
+        setTimeout(() => setMascotState('IDLE'), 2000);
+      },
+      () => {
         setMascotState('IDLE');
         setSpeechError('Could not play audio. Tap again.');
       }
     );
   };
 
-  // Stop / Pause audio
+  // Stop speech playback
   const handleStopSpeech = async () => {
     await speechService.stopSpeaking();
     setMascotState('IDLE');
   };
 
-  // Restart / New Chat
-  const handleNewChat = async () => {
-    speechService.unlockAudio();
-    await speechService.stopSpeaking();
-    setActiveThreadId(undefined);
-    setRecentUserQuery(null);
-    setActiveResponseText(null);
-    setSpeechError(null);
-    setMascotState('HAPPY');
-    setTimeout(() => setMascotState('IDLE'), 2000);
+  // Start a fresh chat
+  const handleNewChat = () => {
+    speechService.stopSpeaking();
+    const newId = 'chat-' + Date.now();
+    const newThread: ConversationThread = {
+      id: newId,
+      title: 'New Conversation',
+      lastUpdated: 'Just now',
+      messages: [
+        {
+          id: 'welcome-' + Date.now(),
+          sender: 'ai',
+          text: "Hello! I'm Bloom. I'm here to listen, help you reflect, or plan your study flow at your own pace.",
+          timestamp: getFormattedTime(),
+          quickReplies: ['Help me focus', "I'm feeling stressed", "Let's talk"],
+        },
+      ],
+    };
+
+    setThreads((prev) => [newThread, ...prev]);
+    setActiveThreadId(newId);
+    setCompanionMode('CHAT');
   };
 
-  // Select Thread
-  const handleSelectThread = async (thread: ConversationThread) => {
-    speechService.unlockAudio();
-    await speechService.stopSpeaking();
+  // Select a thread from drawer
+  const handleSelectThread = (thread: ConversationThread) => {
+    speechService.stopSpeaking();
     setActiveThreadId(thread.id);
-    const lastMsg = thread.messages[thread.messages.length - 1];
-    if (lastMsg) {
-      setActiveResponseText(lastMsg.text);
-      setMascotState(lastMsg.emotion || 'IDLE');
-    }
+    setCompanionMode('CHAT');
   };
 
   const topInset = Math.max(insets.top, Platform.OS === 'android' ? 24 : 16);
 
-  // Mascot sizing dynamically scales to occupy focal center stage
-  const mascotDisplaySize = Math.min(270, Math.max(220, SCREEN_WIDTH * 0.62));
+  // Mascot display size for Voice Bot mode
+  const mascotDisplaySize = Math.min(
+    290,
+    Math.max(220, Math.min(SCREEN_WIDTH * 0.65, SCREEN_HEIGHT * 0.36))
+  );
 
   return (
     <View style={styles.container}>
-      {/* Sidebar Drawer */}
-      <SidebarDrawer
-        isOpen={sidebarOpen}
-        onClose={() => setSidebarOpen(false)}
-        onNewChat={handleNewChat}
-        onSelectThread={handleSelectThread}
-        activeThreadId={activeThreadId}
-      />
-
       <KeyboardAvoidingView
         style={styles.keyboardContainer}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
-        {/* Compact Header Bar */}
+        {/* Top Header Bar */}
         <View style={[styles.topBar, { paddingTop: topInset }]}>
           <View style={styles.topBarContent}>
             {/* Left: Menu */}
             <TouchableOpacity
-              style={styles.topButton}
+              style={[styles.topButton, Shadows.sm]}
               onPress={() => {
                 speechService.unlockAudio();
                 setSidebarOpen(true);
@@ -279,156 +461,413 @@ export default function AICompanionScreen() {
               activeOpacity={0.7}
               accessibilityLabel="Open sidebar menu"
             >
-              <Menu size={20} color="#D2E3DB" strokeWidth={2} />
+              <Menu size={20} color={Colors.darkText} strokeWidth={2} />
             </TouchableOpacity>
 
-            {/* Center: Branding */}
-            <View style={styles.brandGroup}>
-              <Text style={styles.brandTitle}>BLOOM AI</Text>
-              <Text style={styles.brandSub}>Mindful Companion</Text>
-            </View>
-
-            {/* Right: Speaker Audio Toggle & Reset */}
-            <View style={styles.topRightControls}>
+            {/* Center: Mode Segmented Switcher (Voice Bot vs Text Chat) */}
+            <View style={[styles.modeSegment, Shadows.sm]}>
               <TouchableOpacity
                 style={[
-                  styles.topButton,
-                  isVoiceMode && styles.topButtonActive,
-                  mascotState === 'SPEAKING' && styles.topButtonSpeaking,
+                  styles.modeSegmentTab,
+                  companionMode === 'VOICE' && styles.modeSegmentTabActive,
                 ]}
                 onPress={() => {
-                  speechService.unlockAudio();
-                  if (mascotState === 'SPEAKING') {
-                    handleStopSpeech();
-                  } else {
-                    const next = !isVoiceMode;
-                    setIsVoiceMode(next);
-                    if (!next) speechService.stopSpeaking();
-                  }
+                  setCompanionMode('VOICE');
                 }}
                 activeOpacity={0.7}
-                accessibilityLabel={
-                  mascotState === 'SPEAKING'
-                    ? 'Stop speaking'
-                    : isVoiceMode
-                    ? 'Mute speech'
-                    : 'Enable speech'
-                }
               >
-                {mascotState === 'SPEAKING' ? (
-                  <Square size={14} color="#B8EEDA" fill="#B8EEDA" />
-                ) : isVoiceMode ? (
-                  <Volume2 size={18} color="#B8EEDA" strokeWidth={2.2} />
-                ) : (
-                  <VolumeX size={18} color="#6C7A72" strokeWidth={2} />
-                )}
+                <Radio
+                  size={14}
+                  color={companionMode === 'VOICE' ? Colors.primaryDark : Colors.mutedText}
+                  strokeWidth={2.4}
+                />
+                <Text
+                  style={[
+                    styles.modeSegmentText,
+                    companionMode === 'VOICE' && styles.modeSegmentTextActive,
+                  ]}
+                >
+                  Voice Bot
+                </Text>
               </TouchableOpacity>
 
               <TouchableOpacity
-                style={styles.topButton}
-                onPress={handleNewChat}
+                style={[
+                  styles.modeSegmentTab,
+                  companionMode === 'CHAT' && styles.modeSegmentTabActive,
+                ]}
+                onPress={() => {
+                  speechService.stopSpeaking();
+                  setCompanionMode('CHAT');
+                }}
                 activeOpacity={0.7}
-                accessibilityLabel="Restart companion"
               >
-                <RotateCcw size={17} color="#D2E3DB" strokeWidth={2} />
+                <MessageSquare
+                  size={14}
+                  color={companionMode === 'CHAT' ? Colors.primaryDark : Colors.mutedText}
+                  strokeWidth={2.2}
+                />
+                <Text
+                  style={[
+                    styles.modeSegmentText,
+                    companionMode === 'CHAT' && styles.modeSegmentTextActive,
+                  ]}
+                >
+                  Chat
+                </Text>
               </TouchableOpacity>
             </View>
-          </View>
-        </View>
 
-        {/* Center Stage: Animated Interactive Mascot */}
-        <View style={styles.centerStage}>
-          {/* Prominent Center Mascot */}
-          <View style={styles.mascotWrapper}>
-            <AnimatedMascot
-              state={mascotState}
-              size={mascotDisplaySize}
-              onTap={() => {
-                speechService.unlockAudio();
-                setMascotState('HAPPY');
-                setTimeout(() => setMascotState('IDLE'), 2800);
-              }}
-            />
-          </View>
-
-          {/* Compact Response Area (Only appears when there is active speech or thoughts) */}
-          {activeResponseText ? (
-            <View style={styles.compactResponseCard}>
-              <View style={styles.compactResponseHeader}>
-                <View style={styles.responseSpeakerTag}>
-                  <Sparkles size={12} color="#B8EEDA" strokeWidth={2} />
-                  <Text style={styles.responseSpeakerText}>Bloom</Text>
-                </View>
-
-                {/* Audio controls for response */}
-                <View style={styles.responseAudioControls}>
+            {/* Right: Speaker Audio Toggle (in Voice mode) or New Chat Button (in Chat mode) */}
+            <View style={styles.topRightControls}>
+              {companionMode === 'VOICE' ? (
+                <TouchableOpacity
+                  style={[
+                    styles.topButton,
+                    Shadows.sm,
+                    isVoiceMode && styles.topButtonActive,
+                    mascotState === 'SPEAKING' && styles.topButtonSpeaking,
+                  ]}
+                  onPress={() => {
+                    speechService.unlockAudio();
+                    if (mascotState === 'SPEAKING') {
+                      handleStopSpeech();
+                    } else {
+                      const next = !isVoiceMode;
+                      setIsVoiceMode(next);
+                      if (!next) speechService.stopSpeaking();
+                    }
+                  }}
+                  activeOpacity={0.7}
+                  accessibilityLabel={
+                    mascotState === 'SPEAKING'
+                      ? 'Stop speaking'
+                      : isVoiceMode
+                      ? 'Mute speech'
+                      : 'Enable speech'
+                  }
+                >
                   {mascotState === 'SPEAKING' ? (
-                    <TouchableOpacity
-                      style={styles.responseActionBtn}
-                      onPress={handleStopSpeech}
-                      activeOpacity={0.7}
-                    >
-                      <Square size={11} color="#FFDAD6" fill="#FFDAD6" />
-                      <Text style={styles.responseActionBtnText}>Pause</Text>
-                    </TouchableOpacity>
+                    <Square size={13} color={Colors.error} fill={Colors.error} />
+                  ) : isVoiceMode ? (
+                    <Volume2 size={18} color={Colors.primaryDark} strokeWidth={2.2} />
                   ) : (
-                    <TouchableOpacity
-                      style={styles.responseActionBtn}
-                      onPress={handleReplaySpeech}
-                      activeOpacity={0.7}
-                    >
-                      <Play size={11} color="#B8EEDA" fill="#B8EEDA" />
-                      <Text style={styles.responseActionBtnText}>Replay Voice</Text>
-                    </TouchableOpacity>
+                    <VolumeX size={18} color={Colors.lightText} strokeWidth={2} />
                   )}
-                </View>
-              </View>
-
-              {/* Response Text */}
-              <ScrollView
-                style={styles.responseScroll}
-                contentContainerStyle={styles.responseScrollContent}
-                showsVerticalScrollIndicator={true}
-              >
-                {recentUserQuery && (
-                  <Text style={styles.userQueryPreview}>
-                    You: "{recentUserQuery}"
-                  </Text>
-                )}
-                <Text style={styles.responseBodyText}>{activeResponseText}</Text>
-              </ScrollView>
-
-              {/* Error note if audio was blocked */}
-              {speechError && (
-                <View style={styles.speechErrorRow}>
-                  <AlertCircle size={12} color="#F472B6" />
-                  <Text style={styles.speechErrorText}>{speechError}</Text>
-                </View>
+                </TouchableOpacity>
+              ) : (
+                <TouchableOpacity
+                  style={[styles.topButton, Shadows.sm]}
+                  onPress={handleNewChat}
+                  activeOpacity={0.7}
+                  accessibilityLabel="New chat"
+                >
+                  <Plus size={18} color={Colors.primaryDark} strokeWidth={2.2} />
+                </TouchableOpacity>
               )}
             </View>
-          ) : (
-            /* Subtitle prompt when idle */
-            <View style={styles.idleHintContainer}>
-              <Text style={styles.idleHintTitle}>Hey, I'm Bloom 🌱</Text>
-              <Text style={styles.idleHintSubtitle}>
-                Tap me, speak into the mic, or type a thought below.
-              </Text>
-            </View>
-          )}
+          </View>
         </View>
 
-        {/* Compact Bottom Message Composer */}
+        {/* ========================================================= */}
+        {/* VIEW 1: AI COMPANION (VOICE BOT - Only the bot speaking)  */}
+        {/* ========================================================= */}
+        {companionMode === 'VOICE' ? (
+          <View style={styles.voiceStage}>
+            <View style={styles.mascotWrapper}>
+              <AnimatedMascot
+                state={mascotState}
+                size={mascotDisplaySize}
+                onTap={() => {
+                  speechService.unlockAudio();
+                  setMascotState('HAPPY');
+                  setTimeout(() => setMascotState('IDLE'), 2400);
+                }}
+              />
+            </View>
+
+            {/* Floating Speech Transcript Card (Active only when bot speaks) */}
+            {voiceResponseText && (
+              <View style={[styles.voiceResponseCard, Shadows.md]}>
+                <View style={styles.voiceResponseHeader}>
+                  <View style={styles.responseSpeakerTag}>
+                    <Sparkles size={12} color={Colors.primary} strokeWidth={2} />
+                    <Text style={styles.responseSpeakerText}>Bloom Speaking</Text>
+                  </View>
+
+                  <View style={styles.voiceAudioActions}>
+                    {mascotState === 'SPEAKING' ? (
+                      <TouchableOpacity
+                        style={styles.voiceActionBtn}
+                        onPress={handleStopSpeech}
+                        activeOpacity={0.7}
+                      >
+                        <Square size={11} color={Colors.error} fill={Colors.error} />
+                        <Text style={styles.voiceActionBtnText}>Pause</Text>
+                      </TouchableOpacity>
+                    ) : (
+                      <TouchableOpacity
+                        style={styles.voiceActionBtn}
+                        onPress={handleReplaySpeech}
+                        activeOpacity={0.7}
+                      >
+                        <Play size={11} color={Colors.primary} fill={Colors.primary} />
+                        <Text style={styles.voiceActionBtnText}>Replay</Text>
+                      </TouchableOpacity>
+                    )}
+
+                    <TouchableOpacity
+                      style={styles.voiceDismissBtn}
+                      onPress={() => setVoiceResponseText(null)}
+                      activeOpacity={0.7}
+                    >
+                      <X size={13} color={Colors.mutedText} />
+                    </TouchableOpacity>
+                  </View>
+                </View>
+
+                <ScrollView
+                  style={styles.voiceScroll}
+                  contentContainerStyle={styles.voiceScrollContent}
+                  showsVerticalScrollIndicator={true}
+                >
+                  {voiceQuery && (
+                    <Text style={styles.voiceQueryPreview}>
+                      You: "{voiceQuery}"
+                    </Text>
+                  )}
+                  <Text style={styles.voiceBodyText}>{voiceResponseText}</Text>
+                </ScrollView>
+
+                {speechError && (
+                  <View style={styles.speechErrorRow}>
+                    <AlertCircle size={12} color={Colors.error} />
+                    <Text style={styles.speechErrorText}>{speechError}</Text>
+                  </View>
+                )}
+              </View>
+            )}
+          </View>
+        ) : (
+          /* ========================================================= */
+          /* VIEW 2: CHAT OPTION (TEXT CHAT - Only chat conversation)   */
+          /* ========================================================= */
+          <View style={styles.chatStage}>
+            {/* Thread Header Banner */}
+            <View style={styles.threadBanner}>
+              <Text style={styles.threadBannerTitle} numberOfLines={1}>
+                {currentThread.title}
+              </Text>
+              <Text style={styles.threadBannerSub}>{currentThread.lastUpdated}</Text>
+            </View>
+
+            {/* Scrollable Chat Stream */}
+            <ScrollView
+              ref={chatScrollRef}
+              style={styles.chatScroll}
+              contentContainerStyle={styles.chatScrollContent}
+              showsVerticalScrollIndicator={false}
+            >
+              {currentThread.messages.map((msg) => {
+                const isUser = msg.sender === 'user';
+                return (
+                  <View
+                    key={msg.id}
+                    style={[
+                      styles.msgRow,
+                      isUser ? styles.msgRowUser : styles.msgRowAI,
+                    ]}
+                  >
+                    {/* Bloom Mini Avatar for AI messages */}
+                    {!isUser && (
+                      <View style={styles.msgAvatarWrapper}>
+                        <Image
+                          source={require('../../assets/images/bloom-mascot-hd.png')}
+                          style={styles.msgAvatar}
+                          resizeMode="contain"
+                        />
+                      </View>
+                    )}
+
+                    <View style={styles.msgBubbleWrapper}>
+                      <View
+                        style={[
+                          styles.msgBubble,
+                          isUser ? styles.msgBubbleUser : styles.msgBubbleAI,
+                          !isUser && Shadows.sm,
+                        ]}
+                      >
+                        {/* Attached Image or File (like ChatGPT) */}
+                        {msg.attachment && (
+                          <View style={styles.msgAttachmentContainer}>
+                            {msg.attachment.type === 'image' ? (
+                              <Image
+                                source={{ uri: msg.attachment.uri }}
+                                style={styles.attachedImage}
+                                resizeMode="cover"
+                              />
+                            ) : (
+                              <View
+                                style={[
+                                  styles.attachedFileRow,
+                                  isUser ? styles.attachedFileRowUser : styles.attachedFileRowAI,
+                                ]}
+                              >
+                                <FileText
+                                  size={22}
+                                  color={isUser ? Colors.white : Colors.primaryDark}
+                                />
+                                <View style={styles.attachedFileInfo}>
+                                  <Text
+                                    style={[
+                                      styles.attachedFileName,
+                                      isUser && { color: Colors.white },
+                                    ]}
+                                    numberOfLines={1}
+                                  >
+                                    {msg.attachment.name}
+                                  </Text>
+                                  <Text
+                                    style={[
+                                      styles.attachedFileSize,
+                                      isUser && { color: 'rgba(255, 255, 255, 0.75)' },
+                                    ]}
+                                  >
+                                    {msg.attachment.size}
+                                  </Text>
+                                </View>
+                              </View>
+                            )}
+                          </View>
+                        )}
+
+                        {msg.text ? (
+                          <Text
+                            style={[
+                              styles.msgText,
+                              isUser ? styles.msgTextUser : styles.msgTextAI,
+                            ]}
+                          >
+                            {msg.text}
+                          </Text>
+                        ) : null}
+
+                        {/* Step breakdown cards if included in response */}
+                        {msg.steps && msg.steps.length > 0 && (
+                          <View style={styles.stepsList}>
+                            {msg.steps.map((s) => (
+                              <View key={s.stepNumber} style={styles.stepItem}>
+                                <View style={styles.stepBadge}>
+                                  <Text style={styles.stepBadgeNum}>{s.stepNumber}</Text>
+                                </View>
+                                <View style={styles.stepTextContainer}>
+                                  <Text style={styles.stepTitle}>{s.title}</Text>
+                                  <Text style={styles.stepDetail}>{s.detail}</Text>
+                                </View>
+                              </View>
+                            ))}
+                          </View>
+                        )}
+                      </View>
+
+                      {/* Timestamp */}
+                      <Text
+                        style={[
+                          styles.msgTimestamp,
+                          isUser ? styles.msgTimestampUser : styles.msgTimestampAI,
+                        ]}
+                      >
+                        {msg.timestamp}
+                      </Text>
+
+                      {/* Quick Reply Suggestions */}
+                      {msg.quickReplies && msg.quickReplies.length > 0 && (
+                        <View style={styles.quickRepliesRow}>
+                          {msg.quickReplies.map((reply, i) => (
+                            <TouchableOpacity
+                              key={i}
+                              style={styles.quickReplyChip}
+                              onPress={() => processChatMessage(reply)}
+                              activeOpacity={0.7}
+                            >
+                              <Text style={styles.quickReplyText}>{reply}</Text>
+                            </TouchableOpacity>
+                          ))}
+                        </View>
+                      )}
+                    </View>
+                  </View>
+                );
+              })}
+
+              {/* Chat Thinking Indicator */}
+              {isChatTyping && (
+                <View style={[styles.msgRow, styles.msgRowAI]}>
+                  <View style={styles.msgAvatarWrapper}>
+                    <Image
+                      source={require('../../assets/images/bloom-mascot-hd.png')}
+                      style={styles.msgAvatar}
+                      resizeMode="contain"
+                    />
+                  </View>
+                  <View style={[styles.msgBubble, styles.msgBubbleAI, styles.typingBubble, Shadows.sm]}>
+                    <Text style={styles.typingText}>Bloom is reflecting...</Text>
+                  </View>
+                </View>
+              )}
+            </ScrollView>
+          </View>
+        )}
+
+        {/* Bottom Message Composer */}
         <View
           style={[
             styles.composerBar,
-            { paddingBottom: Math.max(insets.bottom, 10) },
+            { paddingBottom: Math.max(insets.bottom, 12) },
           ]}
         >
+          {/* Pending Attachment Chip Preview (ChatGPT Style) */}
+          {selectedAttachment && (
+            <View style={[styles.pendingAttachmentCard, Shadows.sm]}>
+              <View style={styles.pendingAttachmentLeft}>
+                {selectedAttachment.type === 'image' ? (
+                  <Image
+                    source={{ uri: selectedAttachment.uri }}
+                    style={styles.pendingAttachmentThumb}
+                    resizeMode="cover"
+                  />
+                ) : (
+                  <View style={styles.pendingAttachmentFileIcon}>
+                    <FileText size={18} color={Colors.primaryDark} />
+                  </View>
+                )}
+                <View style={styles.pendingAttachmentMeta}>
+                  <Text style={styles.pendingAttachmentName} numberOfLines={1}>
+                    {selectedAttachment.name}
+                  </Text>
+                  <Text style={styles.pendingAttachmentSize}>
+                    {selectedAttachment.type === 'image' ? 'Image' : 'File'} • {selectedAttachment.size}
+                  </Text>
+                </View>
+              </View>
+
+              <TouchableOpacity
+                style={styles.pendingAttachmentCloseBtn}
+                onPress={() => setSelectedAttachment(null)}
+                activeOpacity={0.7}
+                accessibilityLabel="Remove attachment"
+              >
+                <X size={14} color={Colors.mutedText} />
+              </TouchableOpacity>
+            </View>
+          )}
+
           <View style={styles.composerInner}>
-            {/* Microphone Button */}
+            {/* Microphone Button (Voice check-in) */}
             <TouchableOpacity
               style={[
                 styles.micBtn,
+                Shadows.sm,
                 isListening && styles.micBtnActive,
               ]}
               onPress={handleToggleListening}
@@ -436,21 +875,35 @@ export default function AICompanionScreen() {
               accessibilityLabel={isListening ? 'Stop recording' : 'Voice check-in'}
             >
               {isListening ? (
-                <MicOff size={20} color="#FFFFFF" strokeWidth={2.4} />
+                <MicOff size={20} color={Colors.white} strokeWidth={2.4} />
               ) : (
-                <Mic size={20} color="#FFFFFF" strokeWidth={2.4} />
+                <Mic size={20} color={Colors.white} strokeWidth={2.4} />
               )}
             </TouchableOpacity>
 
             {/* Text Input Housing */}
-            <View style={styles.inputHousing}>
+            <View style={[styles.inputHousing, Shadows.sm]}>
+              {/* Attachment Button (Files/Images - like ChatGPT) */}
+              <TouchableOpacity
+                style={styles.attachBtn}
+                onPress={handlePickAttachment}
+                activeOpacity={0.7}
+                accessibilityLabel="Attach file or image"
+              >
+                <Paperclip size={18} color={Colors.mutedText} strokeWidth={2} />
+              </TouchableOpacity>
+
               <TextInput
                 style={styles.textInput}
-                placeholder="Talk or whisper to Bloom..."
-                placeholderTextColor="rgba(210, 227, 219, 0.45)"
+                placeholder={
+                  companionMode === 'VOICE'
+                    ? 'Talk or whisper to Bloom...'
+                    : 'Type a message to Bloom...'
+                }
+                placeholderTextColor={Colors.lightText}
                 value={inputText}
                 onChangeText={setInputText}
-                onSubmitEditing={() => processMessage(inputText)}
+                onSubmitEditing={() => handleSendMessage(inputText)}
                 returnKeyType="send"
                 enablesReturnKeyAutomatically={true}
               />
@@ -458,16 +911,20 @@ export default function AICompanionScreen() {
               <TouchableOpacity
                 style={[
                   styles.sendBtn,
-                  inputText.trim().length > 0 && styles.sendBtnActive,
+                  (inputText.trim().length > 0 || selectedAttachment !== null) && styles.sendBtnActive,
                 ]}
-                onPress={() => processMessage(inputText)}
-                disabled={inputText.trim().length === 0}
+                onPress={() => handleSendMessage(inputText)}
+                disabled={inputText.trim().length === 0 && selectedAttachment === null}
                 activeOpacity={0.8}
                 accessibilityLabel="Send message"
               >
                 <Send
                   size={15}
-                  color={inputText.trim().length > 0 ? '#FFFFFF' : '#4E5F57'}
+                  color={
+                    inputText.trim().length > 0 || selectedAttachment !== null
+                      ? Colors.white
+                      : Colors.lightText
+                  }
                   strokeWidth={2.4}
                 />
               </TouchableOpacity>
@@ -475,6 +932,82 @@ export default function AICompanionScreen() {
           </View>
         </View>
       </KeyboardAvoidingView>
+
+      {/* Sidebar Drawer - Topmost Layer */}
+      <SidebarDrawer
+        isOpen={sidebarOpen}
+        onClose={() => setSidebarOpen(false)}
+        onSelectVoiceMode={() => {
+          setCompanionMode('VOICE');
+        }}
+        onSelectChatMode={() => {
+          setCompanionMode('CHAT');
+        }}
+        onNewChat={handleNewChat}
+        onSelectThread={handleSelectThread}
+        activeMode={companionMode}
+        activeThreadId={activeThreadId}
+        threads={threads}
+      />
+
+      {/* Attachment Option Sheet Modal (ChatGPT-like options) */}
+      <Modal
+        visible={attachModalVisible}
+        transparent={true}
+        animationType="slide"
+        onRequestClose={() => setAttachModalVisible(false)}
+      >
+        <View style={styles.modalBackdrop}>
+          <View style={[styles.modalSheet, Shadows.lg]}>
+            <View style={styles.modalHeader}>
+              <View style={styles.modalHeaderTitleGroup}>
+                <Paperclip size={18} color={Colors.primary} strokeWidth={2.2} />
+                <Text style={styles.modalTitle}>Attach to Bloom</Text>
+              </View>
+              <TouchableOpacity
+                onPress={() => setAttachModalVisible(false)}
+                style={styles.modalCloseBtn}
+              >
+                <X size={18} color={Colors.darkText} />
+              </TouchableOpacity>
+            </View>
+
+            <Text style={styles.modalSubtitle}>
+              Share study notes, diagrams, or documents with your mindful companion:
+            </Text>
+
+            <View style={styles.attachOptionList}>
+              <TouchableOpacity
+                style={styles.attachOptionCard}
+                onPress={() => handleSelectSampleAttachment('image')}
+                activeOpacity={0.7}
+              >
+                <View style={styles.attachOptionIcon}>
+                  <ImageIcon size={20} color={Colors.primary} />
+                </View>
+                <View style={styles.attachOptionMeta}>
+                  <Text style={styles.attachOptionTitle}>Study Diagram / Photo</Text>
+                  <Text style={styles.attachOptionSub}>Attach an image or diagram</Text>
+                </View>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.attachOptionCard}
+                onPress={() => handleSelectSampleAttachment('file')}
+                activeOpacity={0.7}
+              >
+                <View style={styles.attachOptionIcon}>
+                  <FileText size={20} color={Colors.primary} />
+                </View>
+                <View style={styles.attachOptionMeta}>
+                  <Text style={styles.attachOptionTitle}>Document / PDF Notes</Text>
+                  <Text style={styles.attachOptionSub}>Attach study notes or summaries</Text>
+                </View>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
 
       {/* Mobile Voice Input Modal Sheet (Expo Go Helper) */}
       <Modal
@@ -487,10 +1020,10 @@ export default function AICompanionScreen() {
         }}
       >
         <View style={styles.modalBackdrop}>
-          <View style={styles.modalSheet}>
+          <View style={[styles.modalSheet, Shadows.lg]}>
             <View style={styles.modalHeader}>
               <View style={styles.modalHeaderTitleGroup}>
-                <Radio size={18} color="#64D2B4" strokeWidth={2.2} />
+                <Radio size={18} color={Colors.primary} strokeWidth={2.2} />
                 <Text style={styles.modalTitle}>Voice Companion</Text>
               </View>
               <TouchableOpacity
@@ -500,7 +1033,7 @@ export default function AICompanionScreen() {
                 }}
                 style={styles.modalCloseBtn}
               >
-                <X size={18} color="#D2E3DB" />
+                <X size={18} color={Colors.darkText} />
               </TouchableOpacity>
             </View>
 
@@ -550,12 +1083,12 @@ export default function AICompanionScreen() {
                   style={styles.samplePromptCard}
                   onPress={() => {
                     setMobileVoiceModalVisible(false);
-                    processMessage(p);
+                    handleSendMessage(p);
                   }}
                   activeOpacity={0.7}
                 >
                   <Text style={styles.samplePromptText}>"{p}"</Text>
-                  <ArrowRight size={15} color="#78B29C" />
+                  <ArrowRight size={15} color={Colors.primary} />
                 </TouchableOpacity>
               ))}
             </View>
@@ -569,15 +1102,15 @@ export default function AICompanionScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#0B0E1B', // Deep cosmic midnight botanical background
+    backgroundColor: Colors.background, // Exact warm botanical cream #FAF8F2
   },
   keyboardContainer: {
     flex: 1,
   },
   topBar: {
-    backgroundColor: 'rgba(11, 14, 27, 0.94)',
+    backgroundColor: Colors.background,
     borderBottomWidth: 1,
-    borderBottomColor: 'rgba(91, 142, 125, 0.12)',
+    borderBottomColor: Colors.border,
     zIndex: 10,
   },
   topBarContent: {
@@ -591,46 +1124,63 @@ const styles = StyleSheet.create({
     alignSelf: 'center',
   },
   topButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: 'rgba(25, 33, 49, 0.75)',
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: Colors.white,
+    borderWidth: 1,
+    borderColor: Colors.border,
     justifyContent: 'center',
     alignItems: 'center',
   },
   topButtonActive: {
-    backgroundColor: 'rgba(50, 101, 86, 0.7)',
-    borderWidth: 1,
-    borderColor: '#64D2B4',
+    backgroundColor: Colors.lightSage,
+    borderColor: Colors.primary,
   },
   topButtonSpeaking: {
-    backgroundColor: 'rgba(186, 26, 26, 0.4)',
-    borderColor: '#FFDAD6',
-    borderWidth: 1,
+    backgroundColor: Colors.peach,
+    borderColor: Colors.error,
   },
-  brandGroup: {
+  modeSegment: {
+    flexDirection: 'row',
     alignItems: 'center',
+    backgroundColor: Colors.white,
+    borderRadius: 9999,
+    padding: 3,
+    borderWidth: 1,
+    borderColor: Colors.border,
   },
-  brandTitle: {
-    ...Typography.body,
-    fontWeight: '800',
-    fontSize: 15,
-    color: '#F5FFF9',
-    letterSpacing: 0.8,
+  modeSegmentTab: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingHorizontal: 12,
+    paddingVertical: 5,
+    borderRadius: 9999,
   },
-  brandSub: {
+  modeSegmentTabActive: {
+    backgroundColor: Colors.lightSage,
+  },
+  modeSegmentText: {
     ...Typography.caption,
-    fontSize: 10,
-    color: '#9CD1BE',
-    fontWeight: '500',
-    marginTop: 1,
+    fontSize: 12,
+    fontWeight: '600',
+    color: Colors.mutedText,
+  },
+  modeSegmentTextActive: {
+    color: Colors.primaryDark,
+    fontWeight: '700',
   },
   topRightControls: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
   },
-  centerStage: {
+
+  // -------------------------
+  // Voice Bot Mode Stage
+  // -------------------------
+  voiceStage: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
@@ -642,105 +1192,88 @@ const styles = StyleSheet.create({
   mascotWrapper: {
     alignItems: 'center',
     justifyContent: 'center',
-    marginVertical: 8,
+    marginVertical: 4,
   },
-  idleHintContainer: {
-    alignItems: 'center',
-    marginTop: 14,
-    paddingHorizontal: 20,
-  },
-  idleHintTitle: {
-    ...Typography.h3,
-    fontSize: 18,
-    fontWeight: '700',
-    color: '#F5FFF9',
-    letterSpacing: -0.2,
-    marginBottom: 4,
-  },
-  idleHintSubtitle: {
-    ...Typography.caption,
-    fontSize: 13,
-    color: '#9CD1BE',
-    textAlign: 'center',
-    maxWidth: 300,
-    lineHeight: 18,
-  },
-  compactResponseCard: {
+  voiceResponseCard: {
     width: '100%',
     maxHeight: 180,
-    backgroundColor: 'rgba(18, 25, 40, 0.88)',
-    borderRadius: 18,
-    padding: 14,
+    backgroundColor: Colors.white,
+    borderRadius: 20,
+    padding: 16,
     borderWidth: 1,
-    borderColor: 'rgba(120, 178, 156, 0.22)',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 12,
-    elevation: 6,
-    marginTop: 12,
+    borderColor: Colors.border,
+    marginTop: 8,
   },
-  compactResponseHeader: {
+  voiceResponseHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 6,
+    marginBottom: 8,
   },
   responseSpeakerTag: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 5,
-    backgroundColor: 'rgba(50, 101, 86, 0.4)',
-    paddingHorizontal: 9,
-    paddingVertical: 2.5,
+    backgroundColor: Colors.lightSage,
+    paddingHorizontal: 10,
+    paddingVertical: 3.5,
     borderRadius: 9999,
   },
   responseSpeakerText: {
     ...Typography.caption,
     fontSize: 11,
     fontWeight: '700',
-    color: '#B8EEDA',
+    color: Colors.primaryDark,
   },
-  responseAudioControls: {
+  voiceAudioActions: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
+    gap: 8,
   },
-  responseActionBtn: {
+  voiceActionBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
-    backgroundColor: 'rgba(25, 36, 54, 0.8)',
+    backgroundColor: Colors.cream,
     borderWidth: 1,
-    borderColor: 'rgba(120, 178, 156, 0.3)',
-    paddingHorizontal: 9,
-    paddingVertical: 3,
+    borderColor: Colors.border,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
     borderRadius: 9999,
   },
-  responseActionBtnText: {
-    ...Typography.caption,
-    fontSize: 10,
-    color: '#D2E3DB',
-    fontWeight: '600',
-  },
-  responseScroll: {
-    maxHeight: 120,
-  },
-  responseScrollContent: {
-    paddingVertical: 2,
-  },
-  userQueryPreview: {
+  voiceActionBtnText: {
     ...Typography.caption,
     fontSize: 11,
-    color: '#7B8E86',
+    color: Colors.primaryDark,
+    fontWeight: '600',
+  },
+  voiceDismissBtn: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: Colors.lightSage,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: 2,
+  },
+  voiceScroll: {
+    maxHeight: 120,
+  },
+  voiceScrollContent: {
+    paddingVertical: 2,
+  },
+  voiceQueryPreview: {
+    ...Typography.caption,
+    fontSize: 11,
+    color: Colors.mutedText,
     fontStyle: 'italic',
     marginBottom: 4,
   },
-  responseBodyText: {
+  voiceBodyText: {
     ...Typography.bodySmall,
     fontSize: 13,
     lineHeight: 20,
-    color: '#E3F5EA',
+    color: Colors.darkText,
   },
   speechErrorRow: {
     flexDirection: 'row',
@@ -751,14 +1284,292 @@ const styles = StyleSheet.create({
   speechErrorText: {
     ...Typography.caption,
     fontSize: 11,
-    color: '#F472B6',
+    color: Colors.error,
   },
-  composerBar: {
-    backgroundColor: 'rgba(11, 14, 27, 0.95)',
-    borderTopWidth: 1,
-    borderTopColor: 'rgba(91, 142, 125, 0.12)',
+
+  // -------------------------
+  // Chat Mode Stage
+  // -------------------------
+  chatStage: {
+    flex: 1,
+    maxWidth: 720,
+    width: '100%',
+    alignSelf: 'center',
+  },
+  threadBanner: {
     paddingHorizontal: 16,
-    paddingTop: 8,
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.border,
+    backgroundColor: 'rgba(250, 248, 242, 0.85)',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  threadBannerTitle: {
+    ...Typography.body,
+    fontSize: 13,
+    fontWeight: '700',
+    color: Colors.primaryDark,
+    flex: 1,
+    marginRight: 8,
+  },
+  threadBannerSub: {
+    ...Typography.caption,
+    fontSize: 11,
+    color: Colors.mutedText,
+  },
+  chatScroll: {
+    flex: 1,
+    paddingHorizontal: 16,
+  },
+  chatScrollContent: {
+    paddingTop: 14,
+    paddingBottom: 24,
+    gap: 12,
+  },
+  msgRow: {
+    flexDirection: 'row',
+    marginBottom: 4,
+  },
+  msgRowUser: {
+    justifyContent: 'flex-end',
+  },
+  msgRowAI: {
+    justifyContent: 'flex-start',
+    gap: 10,
+  },
+  msgAvatarWrapper: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: Colors.white,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 2,
+  },
+  msgAvatar: {
+    width: 26,
+    height: 26,
+  },
+  msgBubbleWrapper: {
+    maxWidth: '82%',
+  },
+  msgBubble: {
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 18,
+  },
+  msgBubbleUser: {
+    backgroundColor: Colors.primary,
+    borderBottomRightRadius: 4,
+    alignSelf: 'flex-end',
+  },
+  msgBubbleAI: {
+    backgroundColor: Colors.white,
+    borderTopLeftRadius: 4,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    alignSelf: 'flex-start',
+  },
+  msgText: {
+    ...Typography.body,
+    fontSize: 13.5,
+    lineHeight: 20,
+  },
+  msgTextUser: {
+    color: Colors.white,
+  },
+  msgTextAI: {
+    color: Colors.darkText,
+  },
+  msgTimestamp: {
+    ...Typography.caption,
+    fontSize: 10,
+    color: Colors.mutedText,
+    marginTop: 3,
+  },
+  msgTimestampUser: {
+    textAlign: 'right',
+    marginRight: 4,
+  },
+  msgTimestampAI: {
+    marginLeft: 4,
+  },
+
+  // Attached files & images in chat bubbles
+  msgAttachmentContainer: {
+    marginBottom: 8,
+  },
+  attachedImage: {
+    width: 200,
+    height: 140,
+    borderRadius: 12,
+    backgroundColor: '#E8ECE9',
+  },
+  attachedFileRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    padding: 10,
+    borderRadius: 12,
+  },
+  attachedFileRowUser: {
+    backgroundColor: 'rgba(255, 255, 255, 0.18)',
+  },
+  attachedFileRowAI: {
+    backgroundColor: '#F3F6F4',
+  },
+  attachedFileInfo: {
+    flex: 1,
+  },
+  attachedFileName: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: Colors.darkText,
+  },
+  attachedFileSize: {
+    fontSize: 11,
+    color: Colors.mutedText,
+    marginTop: 1,
+  },
+
+  stepsList: {
+    marginTop: 10,
+    gap: 6,
+    backgroundColor: '#F7FAF8',
+    padding: 10,
+    borderRadius: 12,
+  },
+  stepItem: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+  },
+  stepBadge: {
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: Colors.lightSage,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 1,
+  },
+  stepBadgeNum: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: Colors.primaryDark,
+  },
+  stepTextContainer: {
+    flex: 1,
+  },
+  stepTitle: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: Colors.primaryDark,
+  },
+  stepDetail: {
+    fontSize: 11,
+    color: Colors.darkText,
+    marginTop: 1,
+  },
+  quickRepliesRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginTop: 8,
+  },
+  quickReplyChip: {
+    backgroundColor: Colors.cream,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 9999,
+  },
+  quickReplyText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: Colors.primaryDark,
+  },
+  typingBubble: {
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+  },
+  typingText: {
+    ...Typography.caption,
+    fontSize: 11,
+    fontStyle: 'italic',
+    color: Colors.mutedText,
+  },
+
+  // -------------------------
+  // Bottom Composer Bar & Attachments
+  // -------------------------
+  composerBar: {
+    backgroundColor: Colors.background,
+    borderTopWidth: 1,
+    borderTopColor: Colors.border,
+    paddingHorizontal: 16,
+    paddingTop: 10,
+  },
+  pendingAttachmentCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: Colors.white,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    padding: 8,
+    borderRadius: 14,
+    marginBottom: 8,
+    maxWidth: 720,
+    width: '100%',
+    alignSelf: 'center',
+  },
+  pendingAttachmentLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    flex: 1,
+  },
+  pendingAttachmentThumb: {
+    width: 40,
+    height: 40,
+    borderRadius: 8,
+    backgroundColor: '#E8ECE9',
+  },
+  pendingAttachmentFileIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 8,
+    backgroundColor: Colors.lightSage,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  pendingAttachmentMeta: {
+    flex: 1,
+  },
+  pendingAttachmentName: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: Colors.darkText,
+  },
+  pendingAttachmentSize: {
+    fontSize: 10,
+    color: Colors.mutedText,
+    marginTop: 1,
+  },
+  pendingAttachmentCloseBtn: {
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    backgroundColor: '#F3F6F4',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: 6,
   },
   composerInner: {
     maxWidth: 720,
@@ -769,64 +1580,69 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   micBtn: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: '#326556',
+    width: 46,
+    height: 46,
+    borderRadius: 23,
+    backgroundColor: Colors.primary,
     justifyContent: 'center',
     alignItems: 'center',
-    shadowColor: '#64D2B4',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.25,
-    shadowRadius: 6,
-    elevation: 3,
   },
   micBtnActive: {
-    backgroundColor: '#BA1A1A',
-    shadowColor: '#FFDAD6',
+    backgroundColor: Colors.error,
   },
   inputHousing: {
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(21, 29, 46, 0.92)',
+    backgroundColor: Colors.white,
     borderRadius: 9999,
-    paddingHorizontal: 12,
+    paddingLeft: 6,
+    paddingRight: 6,
     paddingVertical: 3,
     borderWidth: 1,
-    borderColor: 'rgba(91, 142, 125, 0.22)',
+    borderColor: Colors.border,
+  },
+  attachBtn: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 2,
   },
   textInput: {
     flex: 1,
     ...Typography.body,
     fontSize: 13,
-    color: '#F5FFF9',
-    paddingVertical: 7,
+    color: Colors.darkText,
+    paddingVertical: 8,
     paddingHorizontal: 6,
   },
   sendBtn: {
     width: 32,
     height: 32,
     borderRadius: 16,
-    backgroundColor: 'rgba(35, 47, 70, 0.7)',
+    backgroundColor: Colors.cream,
     justifyContent: 'center',
     alignItems: 'center',
   },
   sendBtnActive: {
-    backgroundColor: '#326556',
+    backgroundColor: Colors.primary,
   },
+
+  // Modal Sheet & Attachment Picker
   modalBackdrop: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.65)',
+    backgroundColor: Colors.overlay,
     justifyContent: 'flex-end',
   },
   modalSheet: {
-    backgroundColor: '#121828',
+    backgroundColor: Colors.white,
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
     padding: 20,
     borderWidth: 1,
-    borderColor: 'rgba(120, 178, 156, 0.25)',
+    borderColor: Colors.border,
   },
   modalHeader: {
     flexDirection: 'row',
@@ -843,22 +1659,59 @@ const styles = StyleSheet.create({
     ...Typography.body,
     fontSize: 16,
     fontWeight: '700',
-    color: '#F5FFF9',
+    color: Colors.primaryDark,
   },
   modalCloseBtn: {
     width: 32,
     height: 32,
     borderRadius: 16,
-    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    backgroundColor: Colors.cream,
     justifyContent: 'center',
     alignItems: 'center',
   },
   modalSubtitle: {
     ...Typography.caption,
     fontSize: 13,
-    color: '#9CD1BE',
+    color: Colors.mutedText,
     lineHeight: 18,
     marginBottom: 16,
+  },
+  attachOptionList: {
+    gap: 10,
+    marginBottom: 16,
+  },
+  attachOptionCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+    padding: 14,
+    backgroundColor: Colors.cream,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  attachOptionIcon: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    backgroundColor: Colors.white,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  attachOptionMeta: {
+    flex: 1,
+  },
+  attachOptionTitle: {
+    ...Typography.body,
+    fontSize: 14,
+    fontWeight: '700',
+    color: Colors.primaryDark,
+  },
+  attachOptionSub: {
+    ...Typography.caption,
+    fontSize: 11,
+    color: Colors.mutedText,
+    marginTop: 1,
   },
   waveformContainer: {
     flexDirection: 'row',
@@ -871,7 +1724,7 @@ const styles = StyleSheet.create({
   waveformBar: {
     width: 5,
     borderRadius: 3,
-    backgroundColor: '#64D2B4',
+    backgroundColor: Colors.primary,
   },
   samplePromptsList: {
     gap: 8,
@@ -881,16 +1734,16 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    backgroundColor: 'rgba(23, 33, 52, 0.8)',
+    backgroundColor: Colors.cream,
     paddingVertical: 12,
     paddingHorizontal: 14,
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: 'rgba(91, 142, 125, 0.2)',
+    borderColor: Colors.border,
   },
   samplePromptText: {
     ...Typography.bodySmall,
-    color: '#E3F5EA',
+    color: Colors.darkText,
     fontSize: 13,
     flex: 1,
     marginRight: 8,

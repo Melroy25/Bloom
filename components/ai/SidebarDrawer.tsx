@@ -12,26 +12,28 @@ import {
   Platform,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
 import {
   X,
   Plus,
-  Home,
-  Sparkles,
-  Settings,
+  Radio,
   MessageSquare,
   Sprout,
+  Sparkles,
 } from 'lucide-react-native';
 import { Colors } from '../../constants/colors';
 import { Typography } from '../../constants/typography';
-import { RECENT_CHECK_INS, ConversationThread } from '../../services/aiCompanionService';
+import { ConversationThread } from '../../services/aiCompanionService';
 
 interface SidebarDrawerProps {
   isOpen: boolean;
   onClose: () => void;
+  onSelectVoiceMode: () => void;
+  onSelectChatMode: () => void;
   onNewChat: () => void;
   onSelectThread: (thread: ConversationThread) => void;
+  activeMode: 'VOICE' | 'CHAT';
   activeThreadId?: string;
+  threads: ConversationThread[];
 }
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
@@ -40,12 +42,15 @@ const DRAWER_WIDTH = Math.min(320, SCREEN_WIDTH * 0.82);
 export function SidebarDrawer({
   isOpen,
   onClose,
+  onSelectVoiceMode,
+  onSelectChatMode,
   onNewChat,
   onSelectThread,
+  activeMode,
   activeThreadId,
+  threads,
 }: SidebarDrawerProps) {
   const insets = useSafeAreaInsets();
-  const router = useRouter();
   const slideAnim = useRef(new Animated.Value(-DRAWER_WIDTH)).current;
   const fadeAnim = useRef(new Animated.Value(0)).current;
 
@@ -83,19 +88,20 @@ export function SidebarDrawer({
     return null;
   }
 
-  const navigateToHome = () => {
-    onClose();
-    router.replace('/(tabs)');
-  };
-
   return (
-    <View style={StyleSheet.absoluteFill} pointerEvents={isOpen ? 'auto' : 'none'}>
-      {/* Backdrop */}
+    <View
+      style={[
+        styles.rootOverlay,
+        StyleSheet.absoluteFill,
+      ]}
+      pointerEvents={isOpen ? 'auto' : 'none'}
+    >
+      {/* Dimmed Backdrop */}
       <Animated.View style={[styles.backdrop, { opacity: fadeAnim }]}>
         <Pressable style={StyleSheet.absoluteFill} onPress={onClose} />
       </Animated.View>
 
-      {/* Drawer Container */}
+      {/* Solid White Opaque Drawer Container */}
       <Animated.View
         style={[
           styles.drawer,
@@ -141,43 +147,64 @@ export function SidebarDrawer({
             </TouchableOpacity>
           </View>
 
-          {/* Navigation Links */}
+          {/* Communication Modes Section */}
           <View style={styles.navSection}>
+            {/* AI Companion Voice Bot */}
             <TouchableOpacity
-              style={styles.navItem}
-              onPress={navigateToHome}
+              style={[styles.navItem, activeMode === 'VOICE' && styles.navItemActive]}
+              onPress={() => {
+                onSelectVoiceMode();
+                onClose();
+              }}
               activeOpacity={0.7}
             >
-              <Home size={19} color={Colors.mutedText} strokeWidth={1.8} />
-              <Text style={styles.navItemText}>Home</Text>
+              <Radio
+                size={18}
+                color={activeMode === 'VOICE' ? Colors.primaryDark : Colors.mutedText}
+                strokeWidth={2.2}
+              />
+              <View style={styles.navTextContainer}>
+                <Text style={[styles.navItemText, activeMode === 'VOICE' && styles.navItemTextActive]}>
+                  AI Companion
+                </Text>
+                <Text style={styles.navItemBadge}>Voice Bot</Text>
+              </View>
             </TouchableOpacity>
 
-            <View style={[styles.navItem, styles.navItemActive]}>
-              <Sparkles size={19} color={Colors.primaryDark} strokeWidth={2} />
-              <Text style={[styles.navItemText, styles.navItemTextActive]}>AI Companion</Text>
-            </View>
-
+            {/* Text Chat Mode */}
             <TouchableOpacity
-              style={styles.navItem}
-              onPress={onClose}
+              style={[styles.navItem, activeMode === 'CHAT' && styles.navItemActive]}
+              onPress={() => {
+                onSelectChatMode();
+                onClose();
+              }}
               activeOpacity={0.7}
             >
-              <Settings size={19} color={Colors.mutedText} strokeWidth={1.8} />
-              <Text style={styles.navItemText}>Settings</Text>
+              <MessageSquare
+                size={18}
+                color={activeMode === 'CHAT' ? Colors.primaryDark : Colors.mutedText}
+                strokeWidth={2.2}
+              />
+              <View style={styles.navTextContainer}>
+                <Text style={[styles.navItemText, activeMode === 'CHAT' && styles.navItemTextActive]}>
+                  Chat
+                </Text>
+                <Text style={styles.navItemBadge}>Text Only</Text>
+              </View>
             </TouchableOpacity>
           </View>
 
           {/* Divider */}
           <View style={styles.divider} />
 
-          {/* Recent Check-ins */}
+          {/* Recent Check-ins (Direct Text Conversations) */}
           <View style={styles.recentHeader}>
             <Text style={styles.recentHeaderText}>RECENT CHECK-INS</Text>
           </View>
 
           <ScrollView style={styles.recentList} showsVerticalScrollIndicator={false}>
-            {RECENT_CHECK_INS.map((thread) => {
-              const isSelected = activeThreadId === thread.id;
+            {threads.map((thread) => {
+              const isSelected = activeMode === 'CHAT' && activeThreadId === thread.id;
               return (
                 <TouchableOpacity
                   key={thread.id}
@@ -190,7 +217,7 @@ export function SidebarDrawer({
                 >
                   <MessageSquare
                     size={16}
-                    color={isSelected ? Colors.primary : Colors.mutedText}
+                    color={isSelected ? Colors.primaryDark : Colors.mutedText}
                     strokeWidth={1.8}
                   />
                   <Text
@@ -230,23 +257,28 @@ export function SidebarDrawer({
 }
 
 const styles = StyleSheet.create({
+  rootOverlay: {
+    ...StyleSheet.absoluteFill,
+    zIndex: 1000,
+    elevation: 1000,
+  },
   backdrop: {
     ...StyleSheet.absoluteFill,
-    backgroundColor: 'rgba(36, 51, 44, 0.35)',
-    zIndex: 100,
+    backgroundColor: 'rgba(36, 51, 44, 0.45)',
+    zIndex: 1001,
   },
   drawer: {
     position: 'absolute',
     top: 0,
     bottom: 0,
     left: 0,
-    backgroundColor: Colors.white,
-    zIndex: 101,
+    backgroundColor: '#FFFFFF', // Solid 100% opaque white
+    zIndex: 1002,
+    elevation: 1002,
     shadowColor: Colors.shadow,
     shadowOffset: { width: 4, height: 0 },
-    shadowOpacity: 0.12,
-    shadowRadius: 16,
-    elevation: 20,
+    shadowOpacity: 0.16,
+    shadowRadius: 18,
     borderTopRightRadius: 24,
     borderBottomRightRadius: 24,
   },
@@ -254,6 +286,7 @@ const styles = StyleSheet.create({
     flex: 1,
     display: 'flex',
     flexDirection: 'column',
+    backgroundColor: '#FFFFFF',
   },
   header: {
     height: 56,
@@ -261,6 +294,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 20,
+    backgroundColor: '#FFFFFF',
   },
   brandRow: {
     flexDirection: 'row',
@@ -293,6 +327,7 @@ const styles = StyleSheet.create({
   newChatWrapper: {
     paddingHorizontal: 16,
     paddingVertical: 10,
+    backgroundColor: '#FFFFFF',
   },
   newChatButton: {
     flexDirection: 'row',
@@ -317,8 +352,9 @@ const styles = StyleSheet.create({
   },
   navSection: {
     paddingHorizontal: 12,
-    paddingVertical: 8,
+    paddingVertical: 6,
     gap: 4,
+    backgroundColor: '#FFFFFF',
   },
   navItem: {
     flexDirection: 'row',
@@ -326,20 +362,35 @@ const styles = StyleSheet.create({
     gap: 12,
     paddingVertical: 10,
     paddingHorizontal: 16,
-    borderRadius: 9999,
+    borderRadius: 14,
   },
   navItemActive: {
     backgroundColor: '#EAF3ED',
   },
+  navTextContainer: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
   navItemText: {
     ...Typography.body,
     fontSize: 14,
-    color: Colors.mutedText,
-    fontWeight: '500',
+    color: Colors.darkText,
+    fontWeight: '600',
   },
   navItemTextActive: {
     color: Colors.primaryDark,
     fontWeight: '700',
+  },
+  navItemBadge: {
+    fontSize: 10,
+    fontWeight: '600',
+    color: Colors.mutedText,
+    backgroundColor: '#F3F6F4',
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    borderRadius: 6,
   },
   divider: {
     height: 1,
@@ -350,26 +401,29 @@ const styles = StyleSheet.create({
   recentHeader: {
     paddingHorizontal: 20,
     paddingVertical: 6,
+    backgroundColor: '#FFFFFF',
   },
   recentHeaderText: {
     ...Typography.caption,
     fontSize: 11,
     fontWeight: '700',
-    color: Colors.lightText,
+    color: Colors.mutedText,
     letterSpacing: 0.8,
   },
   recentList: {
     flex: 1,
     paddingHorizontal: 12,
+    backgroundColor: '#FFFFFF',
   },
   threadItem: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
-    paddingVertical: 10,
+    paddingVertical: 11,
     paddingHorizontal: 14,
     borderRadius: 12,
     marginBottom: 4,
+    backgroundColor: '#FFFFFF',
   },
   threadItemActive: {
     backgroundColor: '#F3F8F5',
@@ -378,11 +432,12 @@ const styles = StyleSheet.create({
     ...Typography.bodySmall,
     color: Colors.darkText,
     fontSize: 13,
+    fontWeight: '500',
     flex: 1,
   },
   threadTitleActive: {
     color: Colors.primaryDark,
-    fontWeight: '600',
+    fontWeight: '700',
   },
   footerProfile: {
     flexDirection: 'row',
