@@ -399,16 +399,9 @@ export default function HealZoneScreen() {
             <TouchableOpacity
               style={[styles.featureCard, Shadows.sm]}
               onPress={() =>
-                setSelectedFeature({
-                  title: 'Play with me',
-                  subtitle: 'Relaxing mindfulness games',
-                  Icon: Gamepad2,
-                  color: '#5A4E80',
-                  backgroundColor: Colors.lavender,
-                  description:
-                    'Mindful mini-games designed to gently de-stress, stimulate gentle creativity, and reset your mind between study blocks.',
-                  tags: ['Zen Garden', 'Color Flow', 'Mindful Blocks'],
-                  actionLabel: 'Play Quick Game',
+                router.push({
+                  pathname: '/games' as any,
+                  params: { from: '/heal-zone' },
                 })
               }
               activeOpacity={0.82}
@@ -430,16 +423,9 @@ export default function HealZoneScreen() {
             <TouchableOpacity
               style={[styles.featureCard, Shadows.sm]}
               onPress={() =>
-                setSelectedFeature({
-                  title: 'Relax with me',
-                  subtitle: 'Calming playlists and sounds',
-                  Icon: Music,
-                  color: '#2E5A70',
-                  backgroundColor: Colors.softBlue,
-                  description:
-                    'Curated ambient audio, nature frequencies, binaural focus beats, and soothing acoustic melodies.',
-                  tags: ['Gentle Rain', 'Forest Ambience', 'Lo-Fi Chill'],
-                  actionLabel: 'Play Soundscape',
+                router.push({
+                  pathname: '/music' as any,
+                  params: { from: '/heal-zone' },
                 })
               }
               activeOpacity={0.82}
