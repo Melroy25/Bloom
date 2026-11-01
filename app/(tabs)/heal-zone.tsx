@@ -7,6 +7,7 @@ import {
   Platform,
   Animated,
 } from 'react-native';
+import { router } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   Wind,
@@ -219,7 +220,7 @@ export default function HealZoneScreen() {
               backgroundColor={features.bubble.backgroundColor}
               iconBgColor="rgba(54, 91, 69, 0.12)"
               iconColor={features.bubble.color}
-              onPress={() => setSelectedFeature(features.bubble)}
+              onPress={() => router.push('/heal-bubble')}
             />
 
             {/* CARD 2 — DOCUMENTS */}
@@ -230,7 +231,7 @@ export default function HealZoneScreen() {
               backgroundColor={features.documents.backgroundColor}
               iconBgColor="rgba(125, 91, 60, 0.12)"
               iconColor={features.documents.color}
-              onPress={() => setSelectedFeature(features.documents)}
+              onPress={() => router.push('/documents')}
             />
           </View>
 
@@ -243,7 +244,7 @@ export default function HealZoneScreen() {
               backgroundColor={features.games.backgroundColor}
               iconBgColor="rgba(90, 78, 128, 0.12)"
               iconColor={features.games.color}
-              onPress={() => setSelectedFeature(features.games)}
+              onPress={() => router.push({ pathname: '/games', params: { from: '/heal-zone' } })}
             />
 
             {/* CARD 4 — MUSIC */}
@@ -254,7 +255,7 @@ export default function HealZoneScreen() {
               backgroundColor={features.music.backgroundColor}
               iconBgColor="rgba(46, 90, 112, 0.12)"
               iconColor={features.music.color}
-              onPress={() => setSelectedFeature(features.music)}
+              onPress={() => router.push({ pathname: '/music', params: { from: '/heal-zone' } })}
             />
           </View>
         </View>

@@ -7,6 +7,7 @@ import {
   TouchableOpacity,
   TouchableWithoutFeedback,
 } from 'react-native';
+import { router } from 'expo-router';
 import { X, Sparkles, Check, LucideIcon } from 'lucide-react-native';
 import { Colors } from '../../constants/colors';
 import { Typography } from '../../constants/typography';
@@ -98,7 +99,17 @@ export const FeatureDetailModal: React.FC<FeatureDetailModalProps> = ({
                   started && styles.actionButtonActive,
                   Shadows.sm,
                 ]}
-                onPress={() => setStarted(prev => !prev)}
+                onPress={() => {
+                  if (title === 'Heal Bubble') {
+                    onClose();
+                    router.push('/heal-bubble');
+                  } else if (title === 'Music') {
+                    onClose();
+                    router.push('/music');
+                  } else {
+                    setStarted(prev => !prev);
+                  }
+                }}
                 activeOpacity={0.8}
               >
                 {started ? (
