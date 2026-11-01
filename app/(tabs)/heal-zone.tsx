@@ -231,7 +231,7 @@ export default function HealZoneScreen() {
               backgroundColor={features.documents.backgroundColor}
               iconBgColor="rgba(125, 91, 60, 0.12)"
               iconColor={features.documents.color}
-              onPress={() => setSelectedFeature(features.documents)}
+              onPress={() => router.push('/documents')}
             />
           </View>
 
