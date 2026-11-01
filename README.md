@@ -20,10 +20,21 @@ BLOOM is a premium student wellness, self-growth, productivity, and social commu
 - **Closing Motivation**: Botanical card with signature Bloom seedling branding.
 - **Bottom Navigation Bar**: 5 sections with Lucide icons, safe-area insets, and active pill backgrounds:
   1. 🏠 **Home**
-  2. 💚 **Heal Zone** (Healing Bubble, Music Zone, Journal, Mood Tracking, Healing Games)
+  2. 💚 **Heal Zone** (Redesigned: 2x2 Feature Grid, Interactive Mood Logger, Recent History, SVG Mood Trends Chart)
   3. ✨ **AI Companion** (Bloom AI welcome, character personality selector, preview dialogue, chat input UI)
   4. 📋 **Tasks** (Screen Time, Assignment Tracker, Student Tasks, Sleep Tracking, Stress Tracking, Goals, SOS Signal, Focus Mode)
   5. 👥 **Collabs** (Global Community, Friends, Trending Challenges, Group Streaks, Community Activity)
+
+### 🌿 Redesigned Heal Zone Screen
+- **2x2 Feature Grid**:
+  - **Heal Bubble** (Breathing & relaxation, soft sage: `#E8F1E8`)
+  - **Documents** (Personal journaling & notes, soft peach: `#F7E5DA`)
+  - **Games** (Mindful mini-games to destress, soft lavender: `#EAE5F4`)
+  - **Music** (Ambient soundscapes & frequencies, soft blue: `#E2EDF3`)
+- **Current Mood & Check-In**: Full-width rounded card displaying current mood emoji and label with a `+ Log Mood` button.
+- **Mood Selector Modal**: 8-option emotional check-in bottom sheet (*Happy, Excited, Calm, Neutral, Tired, Anxious, Sad, Stressed*). Updates current mood, history, and graph dynamically.
+- **Recent Mood History**: Horizontally scrollable list of past mood entries with dates, timestamps, and active `LATEST` tag.
+- **Mood Trends Graph**: Custom `react-native-svg` line chart with Catmull-Rom/Bezier curve, gradient fill, gridlines, and a 7-day vs 30-day period selector.
 
 ---
 
@@ -60,6 +71,13 @@ bloom/
 │   │   └── EmptyStateCard.tsx          # Empty state placeholder
 │   ├── dashboard/
 │   │   └── BloomHeader.tsx             # Header component
+│   ├── heal-zone/
+│   │   ├── HealFeatureCard.tsx         # 2x2 Feature card component
+│   │   ├── CurrentMoodCard.tsx         # Current mood check-in card
+│   │   ├── MoodSelectorModal.tsx       # 8-option mood bottom sheet
+│   │   ├── MoodHistorySection.tsx      # Horizontal history scroll
+│   │   ├── MoodTrendChart.tsx          # SVG Bezier trend chart
+│   │   └── FeatureDetailModal.tsx      # Feature preview modal
 │   └── cards/
 │       ├── QuoteCard.tsx               # Daily inspiration card
 │       ├── ProgressComparisonCard.tsx  # Before/After comparison card
