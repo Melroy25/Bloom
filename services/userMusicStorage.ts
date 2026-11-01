@@ -1,3 +1,4 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { MusicSong, CustomPlaylist } from '../components/music/musicData';
 
 export interface UserSong {
@@ -116,6 +117,7 @@ export const pickCoverImageFromDevice = async (): Promise<string | null> => {
       input.accept = 'image/*';
       input.style.position = 'fixed';
       input.style.top = '-9999px';
+      input.style.left = '-9999px';
       input.style.opacity = '0';
 
       input.onchange = (e: any) => {
@@ -155,7 +157,7 @@ export const formatDuration = (millis: number): string => {
   return `${minutes}:${seconds < 10 ? '0' : ''}${seconds}`;
 };
 
-// Open or initialize IndexedDB for persistent binary audio storage
+// Open or initialize IndexedDB for persistent binary audio storage (Web)
 const openAudioDB = (): Promise<IDBDatabase | null> => {
   return new Promise((resolve) => {
     if (typeof indexedDB === 'undefined') {
@@ -182,6 +184,9 @@ const openAudioDB = (): Promise<IDBDatabase | null> => {
 const activeBlobUrlCache = new Map<string, string>();
 const inMemoryAudioBlobs = new Map<string, Blob>();
 
+// In-memory metadata cache for fast synchronous access
+let inMemoryMetadata: UserSong[] | null = null;
+
 // Listeners for reactive updates
 const listeners = new Set<() => void>();
 const notify = () => {
@@ -192,28 +197,59 @@ const notify = () => {
   });
 };
 
-// Load song metadata from localStorage
+// Load song metadata from localStorage (Web) and AsyncStorage (Native iOS/Android & Web)
 const loadMetadataList = (): UserSong[] => {
+  if (inMemoryMetadata !== null) {
+    return inMemoryMetadata;
+  }
+
+  // 1. Try synchronous localStorage for instant web render
   try {
     if (typeof globalThis !== 'undefined' && 'localStorage' in globalThis) {
       const raw = globalThis.localStorage.getItem(METADATA_STORAGE_KEY);
       if (raw) {
         const parsed = JSON.parse(raw);
         if (Array.isArray(parsed)) {
-          return parsed.filter((s) => s.userId === CURRENT_USER_ID);
+          inMemoryMetadata = parsed.filter((s) => s.userId === CURRENT_USER_ID);
+          return inMemoryMetadata;
         }
       }
     }
   } catch (e) {}
-  return [];
+
+  // 2. Asynchronously load from React Native AsyncStorage (Native iOS/Android + Web fallback)
+  try {
+    AsyncStorage.getItem(METADATA_STORAGE_KEY).then((raw) => {
+      if (raw) {
+        try {
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed)) {
+            inMemoryMetadata = parsed.filter((s) => s.userId === CURRENT_USER_ID);
+            notify();
+          }
+        } catch (err) {}
+      }
+    }).catch(() => {});
+  } catch (e) {}
+
+  inMemoryMetadata = [];
+  return inMemoryMetadata;
 };
 
-// Save song metadata to localStorage
+// Save song metadata to localStorage and AsyncStorage
 const saveMetadataList = (songs: UserSong[]) => {
+  inMemoryMetadata = songs;
+
+  // 1. Web localStorage
   try {
     if (typeof globalThis !== 'undefined' && 'localStorage' in globalThis) {
       globalThis.localStorage.setItem(METADATA_STORAGE_KEY, JSON.stringify(songs));
     }
+  } catch (e) {}
+
+  // 2. React Native AsyncStorage (Works on iOS, Android & Web)
+  try {
+    AsyncStorage.setItem(METADATA_STORAGE_KEY, JSON.stringify(songs)).catch(() => {});
   } catch (e) {}
 };
 
@@ -298,7 +334,7 @@ export const UserMusicStorage = {
       createdAt: Date.now(),
     };
 
-    // 1. Store the binary file in persistent IndexedDB storage
+    // 1. Store binary/blob in persistent IndexedDB storage (Web) or memory cache
     inMemoryAudioBlobs.set(songId, fileBlob);
     try {
       const db = await openAudioDB();
@@ -312,16 +348,20 @@ export const UserMusicStorage = {
         });
       }
     } catch (e) {
-      // IndexedDB write fallback non-fatal (in-memory handles current session)
+      // IndexedDB write fallback non-fatal
     }
 
-    // 2. Cache active object URL for immediate playback
-    if (typeof URL !== 'undefined') {
-      const blobUrl = URL.createObjectURL(fileBlob);
-      activeBlobUrlCache.set(songId, blobUrl);
+    // 2. Cache active object URL or native file URI for immediate playback
+    if ((fileBlob as any)?.uri) {
+      activeBlobUrlCache.set(songId, (fileBlob as any).uri);
+    } else if (typeof URL !== 'undefined' && typeof URL.createObjectURL === 'function') {
+      try {
+        const blobUrl = URL.createObjectURL(fileBlob);
+        activeBlobUrlCache.set(songId, blobUrl);
+      } catch (e) {}
     }
 
-    // 3. Save metadata to database / localStorage
+    // 3. Save metadata to dual storage (localStorage + AsyncStorage)
     const currentList = loadMetadataList();
     const updatedList = [newSong, ...currentList];
     saveMetadataList(updatedList);
@@ -369,7 +409,7 @@ export const UserMusicStorage = {
       }
     } catch (e) {}
 
-    // 3. Remove metadata
+    // 3. Remove metadata from dual storage
     const currentList = loadMetadataList();
     const filtered = currentList.filter((s) => s.id !== songId);
     saveMetadataList(filtered);
@@ -388,10 +428,12 @@ export const UserMusicStorage = {
     }
 
     // Check in-memory blob
-    if (inMemoryAudioBlobs.has(songId) && typeof URL !== 'undefined') {
-      const url = URL.createObjectURL(inMemoryAudioBlobs.get(songId)!);
-      activeBlobUrlCache.set(songId, url);
-      return url;
+    if (inMemoryAudioBlobs.has(songId) && typeof URL !== 'undefined' && typeof URL.createObjectURL === 'function') {
+      try {
+        const url = URL.createObjectURL(inMemoryAudioBlobs.get(songId)!);
+        activeBlobUrlCache.set(songId, url);
+        return url;
+      } catch (e) {}
     }
 
     // Load from IndexedDB
@@ -406,7 +448,7 @@ export const UserMusicStorage = {
           req.onerror = () => resolve(null);
         });
 
-        if (blob && typeof URL !== 'undefined') {
+        if (blob && typeof URL !== 'undefined' && typeof URL.createObjectURL === 'function') {
           inMemoryAudioBlobs.set(songId, blob);
           const url = URL.createObjectURL(blob);
           activeBlobUrlCache.set(songId, url);
