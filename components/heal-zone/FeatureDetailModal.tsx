@@ -103,6 +103,9 @@ export const FeatureDetailModal: React.FC<FeatureDetailModalProps> = ({
                   if (title === 'Heal Bubble') {
                     onClose();
                     router.push('/heal-bubble');
+                  } else if (title === 'Music') {
+                    onClose();
+                    router.push('/music');
                   } else {
                     setStarted(prev => !prev);
                   }
