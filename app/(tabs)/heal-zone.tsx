@@ -377,7 +377,7 @@ export default function HealZoneScreen() {
             {/* CARD 2 — DIARY / DOCS */}
             <TouchableOpacity
               style={[styles.featureCard, Shadows.sm]}
-              onPress={() => router.push('/documents' as any)}
+              onPress={() => router.push('/documents')}
               activeOpacity={0.82}
             >
               <View style={[styles.cardIconCircle, { backgroundColor: Colors.peach }]}>
