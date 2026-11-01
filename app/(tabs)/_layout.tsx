@@ -87,7 +87,7 @@ export default function TabLayout() {
       <Tabs.Screen
         name="collabs"
         options={{
-          title: 'Collabs',
+          title: 'Bloom Circle',
           tabBarIcon: ({ color, focused }) => (
             <View style={[styles.iconWrapper, focused && styles.activeIconWrapper]}>
               <Users size={22} color={color} strokeWidth={focused ? 2.4 : 1.8} />
