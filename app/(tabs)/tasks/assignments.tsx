@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -10,6 +10,7 @@ import {
   TextInput,
   Dimensions,
 } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
@@ -103,6 +104,32 @@ export default function AssignmentsScreen() {
   const [assignments, setAssignments] = useState<AssignmentItem[]>(INITIAL_ASSIGNMENTS);
   const [filter, setFilter] = useState<'pending' | 'completed'>('pending');
 
+  const STORAGE_KEY = '@bloom_assignments_list';
+
+  // Load persisted assignments on mount
+  useEffect(() => {
+    AsyncStorage.getItem(STORAGE_KEY)
+      .then((raw) => {
+        if (raw) {
+          try {
+            const parsed = JSON.parse(raw);
+            if (Array.isArray(parsed) && parsed.length > 0) {
+              setAssignments(parsed);
+            }
+          } catch {}
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  // Helper to persist assignments
+  const persistAssignments = async (newList: AssignmentItem[]) => {
+    setAssignments(newList);
+    try {
+      await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(newList));
+    } catch {}
+  };
+
   // Modal State
   const [showAddModal, setShowAddModal] = useState(false);
   const [newTitle, setNewTitle] = useState('');
@@ -115,15 +142,15 @@ export default function AssignmentsScreen() {
   const completedList = assignments.filter((a) => a.status === 'completed');
 
   const handleToggleDone = (id: string) => {
-    setAssignments((prev) =>
-      prev.map((a) => {
-        if (a.id === id) {
-          const nextStatus = a.status === 'pending' ? 'completed' : 'pending';
-          return { ...a, status: nextStatus };
-        }
-        return a;
-      })
-    );
+    const updated: AssignmentItem[] = assignments.map((a) => {
+      if (a.id === id) {
+        const nextStatus: 'pending' | 'completed' =
+          a.status === 'pending' ? 'completed' : 'pending';
+        return { ...a, status: nextStatus };
+      }
+      return a;
+    });
+    persistAssignments(updated);
   };
 
   const handleCreateAssignment = () => {
@@ -138,7 +165,8 @@ export default function AssignmentsScreen() {
       estimatedHours: newHours.trim() || '~2 hrs needed',
       status: 'pending',
     };
-    setAssignments((prev) => [newItem, ...prev]);
+    const updated = [newItem, ...assignments];
+    persistAssignments(updated);
     setNewTitle('');
     setNewDesc('');
     setShowAddModal(false);

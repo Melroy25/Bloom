@@ -49,6 +49,14 @@ import {
   getBackendWidgetConfig,
   updateBackendWidgetConfig,
 } from '../../services/bloomBackend';
+import {
+  getCurrentLocation,
+  getStoredLocation,
+  subscribeToLocation,
+  requestLocationPermission,
+  formatCoordinates,
+  UserLocation,
+} from '../../services/locationService';
 
 type SafetySubTab = 'sos' | 'smartwatch' | 'health_connect' | 'widgets';
 
@@ -69,6 +77,11 @@ export default function SafetyHardwareView({ initialTab = 'sos', onBack }: Props
   const [contactRelation, setContactRelation] = useState('');
   const [contactPhone, setContactPhone] = useState('');
 
+  // Real GPS location state
+  const [location, setLocation] = useState<UserLocation | null>(null);
+  const [isLocating, setIsLocating] = useState(false);
+  const [locPermissionDenied, setLocPermissionDenied] = useState(false);
+
   // Smartwatch state
   const [watches, setWatches] = useState<SmartwatchDevice[]>([]);
   const [isScanning, setIsScanning] = useState(false);
@@ -86,7 +99,40 @@ export default function SafetyHardwareView({ initialTab = 'sos', onBack }: Props
 
   useEffect(() => {
     loadAll();
+
+    // Load cached GPS coordinates immediately for instantaneous UI
+    getStoredLocation().then((cached) => {
+      if (cached) setLocation(cached);
+    });
+
+    // Acquire high-precision live GPS coordinates
+    fetchLiveLocation(true);
+
+    // Listen to real-time location updates
+    const unsubscribe = subscribeToLocation((newLoc) => {
+      setLocation(newLoc);
+    });
+
+    return () => unsubscribe();
   }, []);
+
+  const fetchLiveLocation = async (highAccuracy = true) => {
+    setIsLocating(true);
+    try {
+      const loc = await getCurrentLocation(highAccuracy);
+      if (loc) {
+        setLocation(loc);
+        setLocPermissionDenied(false);
+      } else {
+        const hasPerm = await requestLocationPermission();
+        if (!hasPerm) {
+          setLocPermissionDenied(true);
+        }
+      }
+    } finally {
+      setIsLocating(false);
+    }
+  };
 
   const loadAll = async () => {
     setLoading(true);
@@ -125,6 +171,7 @@ export default function SafetyHardwareView({ initialTab = 'sos', onBack }: Props
   const handleStartSos = () => {
     setSosTriggered(false);
     setSosCountdown(5);
+    fetchLiveLocation(true);
   };
 
   const handleCancelSos = () => {
@@ -281,8 +328,28 @@ export default function SafetyHardwareView({ initialTab = 'sos', onBack }: Props
                     <CheckCircle2 size={24} color={Colors.error} strokeWidth={2.2} />
                     <Text style={styles.triggeredTitle}>🚨 EMERGENCY SIGNAL BROADCASTED</Text>
                     <Text style={styles.triggeredDesc}>
-                      SMS dispatch sent to Campus Police and Mom with live GPS coordinates.
+                      {contacts.length > 0
+                        ? `SMS dispatch sent to ${contacts.map((c) => c.name).join(', ')} with live GPS coordinates.`
+                        : 'Emergency broadcast dispatched with your real-time coordinates.'}
                     </Text>
+                    {location && (
+                      <View style={styles.triggeredLocCard}>
+                        <Text style={styles.triggeredLocAddress}>📍 {location.addressLabel}</Text>
+                        <Text style={styles.triggeredLocCoords}>
+                          {formatCoordinates(location.latitude, location.longitude)}
+                        </Text>
+                        <TouchableOpacity
+                          style={styles.openDispatchedPinBtn}
+                          onPress={() => Linking.openURL(location.mapsUrl)}
+                          activeOpacity={0.8}
+                        >
+                          <ExternalLink size={13} color="#FFFFFF" strokeWidth={2.2} />
+                          <Text style={styles.openDispatchedPinText}>
+                            Open Dispatched Pin on Google Maps
+                          </Text>
+                        </TouchableOpacity>
+                      </View>
+                    )}
                     <TouchableOpacity
                       style={styles.resetSosBtn}
                       onPress={handleCancelSos}
@@ -309,17 +376,70 @@ export default function SafetyHardwareView({ initialTab = 'sos', onBack }: Props
                     <MapPin size={18} color={Colors.primaryDark} strokeWidth={2} />
                     <Text style={styles.cardHeaderTitle}>Live GPS Location</Text>
                   </View>
-                  <View style={styles.gpsLivePill}>
-                    <View style={styles.gpsDot} />
-                    <Text style={styles.gpsLiveText}>ACCURATE TO 5M</Text>
+                  <View style={styles.row}>
+                    <TouchableOpacity
+                      style={styles.refreshLocBtn}
+                      onPress={() => fetchLiveLocation(true)}
+                      disabled={isLocating}
+                      activeOpacity={0.7}
+                    >
+                      {isLocating ? (
+                        <ActivityIndicator size="small" color={Colors.primaryDark} />
+                      ) : (
+                        <RefreshCw size={12} color={Colors.primaryDark} strokeWidth={2.2} />
+                      )}
+                      <Text style={styles.refreshLocText}>
+                        {isLocating ? 'Locating...' : 'Refresh GPS'}
+                      </Text>
+                    </TouchableOpacity>
+
+                    <View style={styles.gpsLivePill}>
+                      <View style={[styles.gpsDot, isLocating && styles.gpsDotPulsing]} />
+                      <Text style={styles.gpsLiveText}>
+                        {location?.accuracy
+                          ? `±${Math.round(location.accuracy)}M ACCURACY`
+                          : 'LIVE GPS ACTIVE'}
+                      </Text>
+                    </View>
                   </View>
                 </View>
 
-                <Text style={styles.coordText}>
-                  Lat: 12.9716° N, Long: 77.5946° E (Campus Central Library)
-                </Text>
+                {location ? (
+                  <>
+                    <Text style={styles.coordText}>
+                      {formatCoordinates(location.latitude, location.longitude)}
+                    </Text>
+                    <Text style={styles.coordAddress}>📍 {location.addressLabel}</Text>
+                    <TouchableOpacity
+                      style={styles.mapsLinkRow}
+                      onPress={() => Linking.openURL(location.mapsUrl)}
+                      activeOpacity={0.7}
+                    >
+                      <ExternalLink size={13} color={Colors.primaryDark} strokeWidth={2} />
+                      <Text style={styles.mapsLinkText}>Verify Exact Pin on Google Maps</Text>
+                    </TouchableOpacity>
+                  </>
+                ) : (
+                  <View style={styles.noLocBox}>
+                    <Text style={styles.noLocText}>
+                      {locPermissionDenied
+                        ? 'Location permission not granted. Tap below to enable.'
+                        : 'Acquiring high-precision GPS lock from device satellites...'}
+                    </Text>
+                    <TouchableOpacity
+                      style={styles.enableGpsBtn}
+                      onPress={() => fetchLiveLocation(true)}
+                      activeOpacity={0.8}
+                    >
+                      <Text style={styles.enableGpsBtnText}>
+                        {locPermissionDenied ? 'Enable Location Access' : 'Fetch Real GPS Now'}
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+                )}
+
                 <Text style={styles.coordSub}>
-                  Attached automatically to outbound SMS emergency broadcasts.
+                  Attached automatically to outbound SMS emergency broadcasts with live Google Maps link.
                 </Text>
               </View>
 
@@ -949,11 +1069,31 @@ const styles = StyleSheet.create({
     borderRadius: BorderRadius.round,
     gap: 4,
   },
+  refreshLocBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FAF8F2',
+    borderWidth: 1,
+    borderColor: '#E8ECE9',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: BorderRadius.round,
+    gap: 4,
+    marginRight: 6,
+  },
+  refreshLocText: {
+    fontSize: 9.5,
+    fontWeight: '700',
+    color: Colors.primaryDark,
+  },
   gpsDot: {
     width: 6,
     height: 6,
     borderRadius: 3,
     backgroundColor: Colors.success,
+  },
+  gpsDotPulsing: {
+    backgroundColor: '#E6A23C',
   },
   gpsLiveText: {
     fontSize: 9,
@@ -962,9 +1102,91 @@ const styles = StyleSheet.create({
   },
   coordText: {
     ...Typography.body,
-    fontWeight: '600',
-    fontSize: 13,
+    fontWeight: '700',
+    fontSize: 13.5,
     marginTop: Spacing.sm,
+    color: Colors.darkText,
+  },
+  coordAddress: {
+    fontSize: 12.5,
+    fontWeight: '600',
+    color: Colors.primaryDark,
+    marginTop: 3,
+  },
+  mapsLinkRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginTop: 6,
+    marginBottom: 4,
+  },
+  mapsLinkText: {
+    fontSize: 11.5,
+    fontWeight: '700',
+    color: Colors.primaryDark,
+    textDecorationLine: 'underline',
+  },
+  noLocBox: {
+    backgroundColor: '#FAF8F2',
+    borderRadius: BorderRadius.md,
+    padding: 10,
+    marginTop: 8,
+    borderWidth: 1,
+    borderColor: '#E8ECE9',
+  },
+  noLocText: {
+    fontSize: 11.5,
+    color: Colors.mutedText,
+    marginBottom: 6,
+  },
+  enableGpsBtn: {
+    backgroundColor: Colors.primaryDark,
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: BorderRadius.round,
+    alignSelf: 'flex-start',
+  },
+  enableGpsBtnText: {
+    color: '#FFFFFF',
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  triggeredLocCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: BorderRadius.md,
+    padding: 10,
+    width: '100%',
+    marginVertical: 8,
+    borderWidth: 1,
+    borderColor: '#F5C6C6',
+    alignItems: 'center',
+  },
+  triggeredLocAddress: {
+    fontSize: 12.5,
+    fontWeight: '700',
+    color: Colors.darkText,
+    textAlign: 'center',
+  },
+  triggeredLocCoords: {
+    fontSize: 11,
+    color: Colors.mutedText,
+    marginTop: 2,
+    textAlign: 'center',
+  },
+  openDispatchedPinBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: Colors.error,
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+    borderRadius: BorderRadius.round,
+    marginTop: 8,
+  },
+  openDispatchedPinText: {
+    color: '#FFFFFF',
+    fontSize: 11.5,
+    fontWeight: '700',
   },
   coordSub: {
     ...Typography.caption,

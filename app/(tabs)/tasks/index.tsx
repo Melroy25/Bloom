@@ -11,6 +11,7 @@ import {
   TextInput,
   Modal,
 } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
@@ -84,10 +85,23 @@ export default function TasksMainHubScreen() {
   // Quick tasks list & typing input
   const [tasks, setTasks] = useState<StudentTask[]>([]);
   const [quickInput, setQuickInput] = useState('');
+  const [pendingCount, setPendingCount] = useState(3);
 
-  // Load local tasks
+  // Load local tasks and real-time assignment counts
   useEffect(() => {
     getBackendTasks().then(setTasks);
+
+    AsyncStorage.getItem('@bloom_assignments_list').then((raw) => {
+      if (raw) {
+        try {
+          const list = JSON.parse(raw);
+          if (Array.isArray(list)) {
+            const pending = list.filter((a: any) => a.status === 'pending');
+            setPendingCount(pending.length);
+          }
+        } catch {}
+      }
+    });
   }, [activeDetailModule]);
 
   // Automated quote ticker: moves automatically to the right side every 4.5 seconds
@@ -273,7 +287,7 @@ export default function TasksMainHubScreen() {
                   <CheckSquare size={18} color="#365B45" strokeWidth={2.2} />
                 </View>
                 <View style={styles.cardBadgeMint}>
-                  <Text style={styles.cardBadgeMintText}>3 pending</Text>
+                  <Text style={styles.cardBadgeMintText}>{pendingCount} pending</Text>
                 </View>
               </View>
 
@@ -355,7 +369,7 @@ export default function TasksMainHubScreen() {
             <View>
               <Text style={styles.assignmentsLinkTitle}>Assignments & Course Deadlines</Text>
               <Text style={styles.assignmentsLinkSub}>
-                3 pending submissions • Next due tomorrow
+                {pendingCount} pending submissions • Next due tomorrow
               </Text>
             </View>
           </View>
@@ -480,7 +494,7 @@ export default function TasksMainHubScreen() {
           )}
 
           {activeDetailModule === 'more' && (
-            <SafetyHardwareView initialTab="smartwatch" onBack={() => setActiveDetailModule(null)} />
+            <SafetyHardwareView initialTab="sos" onBack={() => setActiveDetailModule(null)} />
           )}
         </View>
       </Modal>
