@@ -7,6 +7,7 @@ import {
   Platform,
   Animated,
 } from 'react-native';
+import { router } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   Wind,
@@ -219,7 +220,7 @@ export default function HealZoneScreen() {
               backgroundColor={features.bubble.backgroundColor}
               iconBgColor="rgba(54, 91, 69, 0.12)"
               iconColor={features.bubble.color}
-              onPress={() => setSelectedFeature(features.bubble)}
+              onPress={() => router.push('/heal-bubble')}
             />
 
             {/* CARD 2 — DOCUMENTS */}
