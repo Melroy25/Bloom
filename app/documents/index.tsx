@@ -86,7 +86,11 @@ export default function DocumentsListScreen() {
           <View style={styles.headerTopRow}>
             <TouchableOpacity
               style={styles.backButton}
-              onPress={() => router.back()}
+              onPress={() =>
+                router.canGoBack()
+                  ? router.back()
+                  : router.push('/(tabs)/heal-zone' as any)
+              }
               activeOpacity={0.7}
               hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
             >

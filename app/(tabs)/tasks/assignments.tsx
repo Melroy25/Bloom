@@ -109,7 +109,7 @@ export default function AssignmentsScreen() {
   // Load persisted assignments on mount
   useEffect(() => {
     AsyncStorage.getItem(STORAGE_KEY)
-      .then((raw) => {
+      .then((raw: string | null) => {
         if (raw) {
           try {
             const parsed = JSON.parse(raw);

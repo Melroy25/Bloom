@@ -178,8 +178,8 @@ export async function cancelAllBloomNotifications(): Promise<void> {
     const scheduled = await notif.getAllScheduledNotificationsAsync();
     await Promise.all(
       scheduled
-        .filter((n) => n.identifier.startsWith('bloom_asg_'))
-        .map((n) => notif.cancelScheduledNotificationAsync(n.identifier))
+        .filter((n: any) => n.identifier.startsWith('bloom_asg_'))
+        .map((n: any) => notif.cancelScheduledNotificationAsync(n.identifier))
     );
   } catch {}
 }

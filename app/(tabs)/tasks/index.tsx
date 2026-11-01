@@ -91,7 +91,7 @@ export default function TasksMainHubScreen() {
   useEffect(() => {
     getBackendTasks().then(setTasks);
 
-    AsyncStorage.getItem('@bloom_assignments_list').then((raw) => {
+    AsyncStorage.getItem('@bloom_assignments_list').then((raw: string | null) => {
       if (raw) {
         try {
           const list = JSON.parse(raw);
