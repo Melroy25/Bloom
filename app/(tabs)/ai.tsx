@@ -7,11 +7,11 @@ import {
   TextInput,
   TouchableOpacity,
   Pressable,
-  Image,
   Animated,
   KeyboardAvoidingView,
   Platform,
   Dimensions,
+  Modal,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
@@ -19,138 +19,235 @@ import {
   RotateCcw,
   Send,
   Mic,
-  Plus,
+  MicOff,
+  Volume2,
+  VolumeX,
+  Square,
+  Sparkles,
   ArrowRight,
-  ArrowUp,
+  Heart,
   Leaf,
   Timer,
   MessageSquare,
-  ThumbsUp,
-  Copy,
-  Check,
-  BookOpen,
-  Wind,
-  Calendar,
-  Sparkles,
+  X,
+  Radio,
 } from 'lucide-react-native';
 import { Colors } from '../../constants/colors';
 import { Typography } from '../../constants/typography';
 import {
+  MascotState,
   ChatMessage,
   INITIAL_SUGGESTIONS,
-  RECENT_CHECK_INS,
   ConversationThread,
   generateCompanionResponse,
+  detectEmotionFromContext,
   getFormattedTime,
 } from '../../services/aiCompanionService';
+import { speechService } from '../../services/speechService';
+import { AnimatedMascot } from '../../components/ai/AnimatedMascot';
 import { SidebarDrawer } from '../../components/ai/SidebarDrawer';
 import { StudySprintCard } from '../../components/ai/StudySprintCard';
 
-const { width: SCREEN_WIDTH } = Dimensions.get('window');
-const IS_DESKTOP = Platform.OS === 'web' && SCREEN_WIDTH > 768;
+const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
+
+const SAMPLE_VOICE_PROMPTS = [
+  "I'm feeling really anxious about my finals",
+  "Help me focus with a 20-minute study sprint",
+  "Can we do a gentle box-breathing exercise?",
+  "How can I pace my study time today without burnout?",
+];
 
 export default function AICompanionScreen() {
   const insets = useSafeAreaInsets();
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [inputText, setInputText] = useState('');
-  const [isTyping, setIsTyping] = useState(false);
-  const [sidebarOpen, setSidebarOpen] = useState(false);
+
+  // State
+  const [mascotState, setMascotState] = useState<MascotState>('IDLE');
+  const [isVoiceMode, setIsVoiceMode] = useState<boolean>(true); // Spoken audio playback enabled
+  const [isListening, setIsListening] = useState<boolean>(false);
+  const [inputText, setInputText] = useState<string>('');
+  const [activeSpeechText, setActiveSpeechText] = useState<string>(
+    "Hello! 🌱 I'm Bloom. Tap me, speak into the mic, or type below. I'm right here with you."
+  );
+  const [activeSpeaker, setActiveSpeaker] = useState<'ai' | 'user'>('ai');
+  const [activeSteps, setActiveSteps] = useState<any[] | null>(null);
+  const [showSprintWidget, setShowSprintWidget] = useState<boolean>(false);
+  const [sprintTopic, setSprintTopic] = useState<string>('Focus Sprint');
+  const [quickReplies, setQuickReplies] = useState<string[]>([
+    "I'm feeling stressed",
+    'Help me focus',
+    "Let's talk",
+  ]);
+
+  // Sidebar
+  const [sidebarOpen, setSidebarOpen] = useState<boolean>(false);
   const [activeThreadId, setActiveThreadId] = useState<string | undefined>(undefined);
-  const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
-  const [likedMessageIds, setLikedMessageIds] = useState<Record<string, boolean>>({});
 
-  const scrollViewRef = useRef<any>(null);
+  // Mobile voice prompt sheet (when native web speech recognition is unavailable in Expo Go)
+  const [mobileVoiceModalVisible, setMobileVoiceModalVisible] = useState<boolean>(false);
+  const [voiceWaveAnim] = useState(new Animated.Value(0.3));
 
-  // Floating mascot animation in empty state
-  const floatAnim = useRef(new Animated.Value(0)).current;
-
+  // Voice waveform pulse animation
   useEffect(() => {
-    const loop = Animated.loop(
-      Animated.sequence([
-        Animated.timing(floatAnim, {
-          toValue: -8,
-          duration: 2000,
-          useNativeDriver: true,
-        }),
-        Animated.timing(floatAnim, {
-          toValue: 0,
-          duration: 2000,
-          useNativeDriver: true,
-        }),
-      ])
-    );
-    loop.start();
-    return () => loop.stop();
-  }, [floatAnim]);
-
-  // Auto-scroll on new messages
-  useEffect(() => {
-    if (messages.length > 0) {
-      setTimeout(() => {
-        scrollViewRef.current?.scrollToEnd({ animated: true });
-      }, 100);
+    if (isListening || mobileVoiceModalVisible) {
+      const loop = Animated.loop(
+        Animated.sequence([
+          Animated.timing(voiceWaveAnim, {
+            toValue: 1,
+            duration: 400,
+            useNativeDriver: true,
+          }),
+          Animated.timing(voiceWaveAnim, {
+            toValue: 0.3,
+            duration: 400,
+            useNativeDriver: true,
+          }),
+        ])
+      );
+      loop.start();
+      return () => loop.stop();
     }
-  }, [messages, isTyping]);
+  }, [isListening, mobileVoiceModalVisible, voiceWaveAnim]);
 
-  const handleSendMessage = async (textToSend?: string) => {
-    const text = (textToSend || inputText).trim();
-    if (!text || isTyping) return;
+  // Process and deliver AI response
+  const processInput = async (userInput: string) => {
+    const trimmed = userInput.trim();
+    if (!trimmed) return;
 
+    // Stop any ongoing speech
+    await speechService.stopSpeaking();
+
+    // Show user message in dialogue
+    setActiveSpeaker('user');
+    setActiveSpeechText(trimmed);
     setInputText('');
 
-    const userMessage: ChatMessage = {
-      id: 'usr-' + Date.now(),
-      sender: 'user',
-      text,
-      timestamp: getFormattedTime(),
-    };
-
-    setMessages((prev) => [...prev, userMessage]);
-    setIsTyping(true);
+    // Emotional reaction based on user query
+    const emotion = detectEmotionFromContext(trimmed);
+    setMascotState('THINKING');
 
     try {
-      const companionReply = await generateCompanionResponse(text);
-      setMessages((prev) => [...prev, companionReply]);
+      const response = await generateCompanionResponse(trimmed);
+
+      // Transition to speaking
+      setActiveSpeaker('ai');
+      setActiveSpeechText(response.text);
+      setActiveSteps(response.steps || null);
+      setShowSprintWidget(!!response.showSprintWidget);
+      if (response.sprintTopic) setSprintTopic(response.sprintTopic);
+      if (response.quickReplies) setQuickReplies(response.quickReplies);
+
+      if (isVoiceMode) {
+        setMascotState('SPEAKING');
+        await speechService.speak(
+          response.text,
+          () => {
+            setMascotState('SPEAKING');
+          },
+          () => {
+            // Settle into appropriate resting emotion (COMFORTING or IDLE)
+            setMascotState(response.emotion === 'COMFORTING' ? 'COMFORTING' : 'IDLE');
+          },
+          () => {
+            setMascotState('IDLE');
+          }
+        );
+      } else {
+        // Voice muted
+        setMascotState(response.emotion || 'IDLE');
+      }
     } catch {
-      const fallbackReply: ChatMessage = {
-        id: 'fallback-' + Date.now(),
-        sender: 'ai',
-        text: "I'm right here with you 🌱. Take a gentle breath and let's take this one step at a time.",
-        timestamp: getFormattedTime(),
-      };
-      setMessages((prev) => [...prev, fallbackReply]);
-    } finally {
-      setIsTyping(false);
+      setActiveSpeaker('ai');
+      setActiveSpeechText("I'm right here with you 🌱. Take a gentle breath and let's take this one step at a time.");
+      setMascotState('COMFORTING');
     }
   };
 
-  const handlePromptSelect = (prompt: string) => {
-    handleSendMessage(prompt);
+  // Toggle Voice Listening (Speech Recognition)
+  const handleToggleListening = () => {
+    if (isListening) {
+      speechService.stopListening();
+      setIsListening(false);
+      setMascotState('IDLE');
+      return;
+    }
+
+    // Stop speaking if mascot was talking
+    speechService.stopSpeaking();
+
+    setIsListening(true);
+    setMascotState('LISTENING');
+    setActiveSpeaker('ai');
+    setActiveSpeechText("I'm listening softly... speak whenever you're ready 🌱");
+
+    const started = speechService.startListening({
+      onStart: () => {
+        setIsListening(true);
+        setMascotState('LISTENING');
+      },
+      onResult: (transcript: string) => {
+        setIsListening(false);
+        if (transcript.trim()) {
+          processInput(transcript);
+        } else {
+          setMascotState('IDLE');
+        }
+      },
+      onError: (errorMsg: string) => {
+        setIsListening(false);
+        if (errorMsg === 'MOBILE_EXPO_GO_VOICE') {
+          // On mobile Expo Go, open the voice companion sheet
+          setMobileVoiceModalVisible(true);
+          setMascotState('LISTENING');
+        } else {
+          setMascotState('IDLE');
+          setActiveSpeechText(`Mic note: ${errorMsg}`);
+        }
+      },
+      onEnd: () => {
+        setIsListening(false);
+      },
+    });
+
+    if (!started && Platform.OS !== 'web') {
+      setIsListening(false);
+      setMobileVoiceModalVisible(true);
+      setMascotState('LISTENING');
+    }
   };
 
-  const handleNewChat = () => {
-    setMessages([]);
+  // Interrupt / Stop AI Speech
+  const handleInterruptSpeech = async () => {
+    await speechService.stopSpeaking();
+    setMascotState('IDLE');
+  };
+
+  // New Chat action
+  const handleNewChat = async () => {
+    await speechService.stopSpeaking();
     setActiveThreadId(undefined);
-    setInputText('');
+    setActiveSpeaker('ai');
+    setActiveSpeechText("Fresh reflection space 🌱 How are you feeling right now?");
+    setActiveSteps(null);
+    setShowSprintWidget(false);
+    setQuickReplies(["I'm feeling stressed", 'Help me focus', "Let's talk"]);
+    setMascotState('HAPPY');
+    setTimeout(() => setMascotState('IDLE'), 1800);
   };
 
-  const handleSelectThread = (thread: ConversationThread) => {
+  // Select past thread
+  const handleSelectThread = async (thread: ConversationThread) => {
+    await speechService.stopSpeaking();
     setActiveThreadId(thread.id);
-    setMessages(thread.messages);
-  };
-
-  const handleCopyMessage = (id: string, text: string) => {
-    setCopiedMessageId(id);
-    setTimeout(() => {
-      setCopiedMessageId(null);
-    }, 2000);
-  };
-
-  const toggleLikeMessage = (id: string) => {
-    setLikedMessageIds((prev) => ({
-      ...prev,
-      [id]: !prev[id],
-    }));
+    const lastMsg = thread.messages[thread.messages.length - 1];
+    if (lastMsg) {
+      setActiveSpeaker(lastMsg.sender);
+      setActiveSpeechText(lastMsg.text);
+      setActiveSteps(lastMsg.steps || null);
+      setShowSprintWidget(!!lastMsg.showSprintWidget);
+      if (lastMsg.sprintTopic) setSprintTopic(lastMsg.sprintTopic);
+      if (lastMsg.quickReplies) setQuickReplies(lastMsg.quickReplies);
+      setMascotState(lastMsg.emotion || 'IDLE');
+    }
   };
 
   const topInset = Math.max(insets.top, Platform.OS === 'android' ? 24 : 16);
@@ -166,352 +263,317 @@ export default function AICompanionScreen() {
         activeThreadId={activeThreadId}
       />
 
-      {/* Main App Container */}
       <KeyboardAvoidingView
         style={styles.keyboardContainer}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
-        {/* Header Bar */}
-        <View style={[styles.headerBar, { paddingTop: topInset }]}>
-          <View style={styles.headerContent}>
-            {/* Left: Menu & Mascot Avatar */}
-            <View style={styles.headerLeft}>
-              <TouchableOpacity
-                style={styles.iconButton}
-                onPress={() => setSidebarOpen(true)}
-                activeOpacity={0.7}
-                accessibilityLabel="Open sidebar menu"
-              >
-                <Menu size={22} color={Colors.darkText} strokeWidth={2} />
-              </TouchableOpacity>
+        {/* Top Controls Bar */}
+        <View style={[styles.topBar, { paddingTop: topInset }]}>
+          <View style={styles.topBarContent}>
+            {/* Left: Menu */}
+            <TouchableOpacity
+              style={styles.topButton}
+              onPress={() => setSidebarOpen(true)}
+              activeOpacity={0.7}
+              accessibilityLabel="Open sidebar menu"
+            >
+              <Menu size={22} color="#D2E3DB" strokeWidth={2} />
+            </TouchableOpacity>
 
-              <View style={styles.headerTitleGroup}>
-                <View style={styles.mascotAvatarSmall}>
-                  <Image
-                    source={require('../../assets/bloom-mascot.png')}
-                    style={styles.mascotImgSmall}
-                    resizeMode="contain"
-                  />
-                </View>
-                <View>
-                  <View style={styles.brandTitleRow}>
-                    <Text style={styles.brandTitleText}>Bloom</Text>
-                    <View style={styles.onlineDot} />
-                  </View>
-                  <Text style={styles.brandSubtitleText}>Gentle pacing</Text>
-                </View>
+            {/* Center Title */}
+            <View style={styles.brandTitleGroup}>
+              <Text style={styles.brandTitleText}>BLOOM AI</Text>
+              <View style={styles.brandSubRow}>
+                <View
+                  style={[
+                    styles.statusIndicatorDot,
+                    {
+                      backgroundColor:
+                        mascotState === 'SPEAKING'
+                          ? '#64D2B4'
+                          : mascotState === 'LISTENING'
+                          ? '#78B29C'
+                          : '#B8EEDA',
+                    },
+                  ]}
+                />
+                <Text style={styles.brandSubText}>
+                  {mascotState === 'SPEAKING'
+                    ? 'Speaking softly'
+                    : mascotState === 'LISTENING'
+                    ? 'Listening...'
+                    : mascotState === 'THINKING'
+                    ? 'Reflecting...'
+                    : 'Serene companion'}
+                </Text>
               </View>
             </View>
 
-            {/* Right: Focus Space Pill & Reset */}
-            <View style={styles.headerRight}>
-              <View style={styles.focusSpaceBadge}>
-                <View style={styles.focusPulseDot} />
-                <Text style={styles.focusSpaceText}>Focus Space</Text>
-              </View>
+            {/* Right: Audio Toggle & Reset */}
+            <View style={styles.topRightControls}>
+              <TouchableOpacity
+                style={[styles.topButton, isVoiceMode && styles.topButtonActive]}
+                onPress={() => {
+                  const nextState = !isVoiceMode;
+                  setIsVoiceMode(nextState);
+                  if (!nextState) speechService.stopSpeaking();
+                }}
+                activeOpacity={0.7}
+                accessibilityLabel={isVoiceMode ? 'Mute voice' : 'Enable voice'}
+              >
+                {isVoiceMode ? (
+                  <Volume2 size={19} color="#B8EEDA" strokeWidth={2} />
+                ) : (
+                  <VolumeX size={19} color="#7D8E86" strokeWidth={2} />
+                )}
+              </TouchableOpacity>
 
               <TouchableOpacity
-                style={styles.iconButton}
+                style={styles.topButton}
                 onPress={handleNewChat}
                 activeOpacity={0.7}
-                accessibilityLabel="Start fresh chat"
+                accessibilityLabel="Restart conversation"
               >
-                <RotateCcw size={18} color={Colors.mutedText} strokeWidth={2} />
+                <RotateCcw size={18} color="#D2E3DB" strokeWidth={2} />
               </TouchableOpacity>
             </View>
           </View>
         </View>
 
-        {/* Chat / Content Viewport */}
+        {/* Centerpiece Stage: Animated Interactive Mascot */}
         <ScrollView
-          ref={scrollViewRef}
-          style={styles.scrollView}
-          contentContainerStyle={[
-            styles.scrollContent,
-            messages.length === 0 && styles.scrollContentEmpty,
-          ]}
+          style={styles.centerStageScroll}
+          contentContainerStyle={styles.centerStageContent}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
         >
-          {messages.length === 0 ? (
-            /* EMPTY CHAT STATE */
-            <View style={styles.emptyStateContainer}>
-              {/* Floating Center Mascot */}
-              <View style={styles.mascotWrapper}>
-                <View style={styles.haloGlow} />
-                <Animated.View
-                  style={[
-                    styles.mascotAnimatedContainer,
-                    { transform: [{ translateY: floatAnim }] },
-                  ]}
-                >
-                  <Image
-                    source={require('../../assets/bloom-mascot.png')}
-                    style={styles.mascotLarge}
-                    resizeMode="contain"
-                  />
-                </Animated.View>
-              </View>
+          {/* Animated Mascot */}
+          <View style={styles.mascotContainer}>
+            <AnimatedMascot
+              state={mascotState}
+              size={Math.min(200, SCREEN_WIDTH * 0.48)}
+              onTap={() => {
+                setMascotState('HAPPY');
+                setTimeout(() => setMascotState('IDLE'), 2800);
+              }}
+            />
+          </View>
 
-              {/* Welcome Headlines */}
-              <View style={styles.welcomeTextGroup}>
-                <Text style={styles.welcomeTitle}>Hey, I'm Bloom 🌱</Text>
-                <Text style={styles.welcomeSubtitle}>
-                  Your gentle companion to reflect, unwind, and study mindfully.
+          {/* Dynamic Dialogue Glass Card */}
+          <View style={styles.dialogueGlassCard}>
+            <View style={styles.dialogueHeader}>
+              <View style={styles.dialogueSpeakerBadge}>
+                <Sparkles size={13} color="#B8EEDA" strokeWidth={2} />
+                <Text style={styles.dialogueSpeakerText}>
+                  {activeSpeaker === 'ai' ? 'Bloom' : 'You'}
                 </Text>
               </View>
 
-              {/* Gentle Ways to Begin Section */}
-              <View style={styles.suggestionsContainer}>
-                <View style={styles.suggestionsHeader}>
-                  <Text style={styles.suggestionsLabel}>Gentle ways to begin</Text>
-                  <View style={styles.tapToStartPill}>
-                    <Sparkles size={12} color={Colors.primary} strokeWidth={2} />
-                    <Text style={styles.tapToStartText}>Tap to start</Text>
-                  </View>
-                </View>
+              {/* Interrupt / Stop Button when Speaking */}
+              {mascotState === 'SPEAKING' && (
+                <TouchableOpacity
+                  style={styles.interruptButton}
+                  onPress={handleInterruptSpeech}
+                  activeOpacity={0.8}
+                >
+                  <Square size={10} color="#FFDAD6" fill="#FFDAD6" />
+                  <Text style={styles.interruptText}>Pause Voice</Text>
+                </TouchableOpacity>
+              )}
+            </View>
 
-                {INITIAL_SUGGESTIONS.map((item) => (
+            {/* Speech Prose */}
+            <Text style={styles.dialogueBodyText}>{activeSpeechText}</Text>
+
+            {/* Structured Steps if present */}
+            {activeSteps && activeSteps.length > 0 && (
+              <View style={styles.stepsContainer}>
+                {activeSteps.map((st) => (
+                  <View key={st.stepNumber} style={styles.stepRow}>
+                    <View style={styles.stepBadge}>
+                      <Text style={styles.stepBadgeText}>{st.stepNumber}</Text>
+                    </View>
+                    <Text style={styles.stepText}>
+                      <Text style={styles.stepTitleBold}>{st.title} </Text>
+                      {st.detail}
+                    </Text>
+                  </View>
+                ))}
+              </View>
+            )}
+
+            {/* Interactive Focus Sprint Card if present */}
+            {showSprintWidget && (
+              <View style={styles.sprintCardWrapper}>
+                <StudySprintCard topic={sprintTopic} initialMinutes={20} />
+              </View>
+            )}
+
+            {/* Quick Action Suggestion Pills */}
+            {quickReplies && quickReplies.length > 0 && (
+              <View style={styles.quickRepliesRow}>
+                {quickReplies.map((reply, idx) => (
                   <TouchableOpacity
-                    key={item.id}
-                    style={styles.suggestionCard}
-                    onPress={() => handlePromptSelect(item.prompt)}
+                    key={idx}
+                    style={styles.quickReplyPill}
+                    onPress={() => processInput(reply)}
                     activeOpacity={0.7}
                   >
-                    <View style={styles.suggestionLeft}>
-                      <View style={styles.suggestionIconBox}>
-                        {item.icon === 'spa' && (
-                          <Leaf size={18} color={Colors.primaryDark} strokeWidth={2} />
-                        )}
-                        {item.icon === 'timer' && (
-                          <Timer size={18} color="#45617A" strokeWidth={2} />
-                        )}
-                        {item.icon === 'chat' && (
-                          <MessageSquare size={18} color="#505F59" strokeWidth={2} />
-                        )}
-                      </View>
-                      <View style={styles.suggestionTextGroup}>
-                        <Text style={styles.suggestionTitle}>{item.title}</Text>
-                        <Text style={styles.suggestionSubtitle}>{item.subtitle}</Text>
-                      </View>
-                    </View>
-                    <ArrowRight size={17} color={Colors.lightText} strokeWidth={2} />
+                    <Leaf size={11} color="#B8EEDA" strokeWidth={2} />
+                    <Text style={styles.quickReplyPillText}>{reply}</Text>
                   </TouchableOpacity>
                 ))}
               </View>
-            </View>
-          ) : (
-            /* ACTIVE CONVERSATION STREAM */
-            <View style={styles.chatThread}>
-              {/* Day Divider */}
-              <View style={styles.dayDivider}>
-                <View style={styles.dayDividerBadge}>
-                  <Text style={styles.dayDividerText}>Today, Nov 12</Text>
-                </View>
-              </View>
+            )}
+          </View>
 
-              {/* Messages */}
-              {messages.map((msg) => (
-                <View
-                  key={msg.id}
-                  style={[
-                    styles.messageRow,
-                    msg.sender === 'user' ? styles.userRow : styles.aiRow,
-                  ]}
-                >
-                  {/* AI Avatar */}
-                  {msg.sender === 'ai' && (
-                    <View style={styles.aiBubbleAvatar}>
-                      <Image
-                        source={require('../../assets/bloom-mascot.png')}
-                        style={styles.aiAvatarImg}
-                        resizeMode="contain"
-                      />
-                    </View>
-                  )}
-
-                  {/* Message Bubble Container */}
-                  <View
-                    style={[
-                      styles.messageBubble,
-                      msg.sender === 'user' ? styles.userBubble : styles.aiBubble,
-                    ]}
-                  >
-                    {/* Message Body Text */}
-                    <Text
-                      style={[
-                        styles.messageText,
-                        msg.sender === 'user' ? styles.userText : styles.aiText,
-                      ]}
-                    >
-                      {msg.text}
-                    </Text>
-
-                    {/* Optional Structured Steps */}
-                    {msg.steps && msg.steps.length > 0 && (
-                      <View style={styles.stepsContainer}>
-                        {msg.steps.map((st) => (
-                          <View key={st.stepNumber} style={styles.stepRow}>
-                            <View style={styles.stepBadge}>
-                              <Text style={styles.stepBadgeText}>{st.stepNumber}</Text>
-                            </View>
-                            <Text style={styles.stepText}>
-                              <Text style={styles.stepTitleBold}>{st.title} </Text>
-                              {st.detail}
-                            </Text>
-                          </View>
-                        ))}
-                      </View>
-                    )}
-
-                    {/* Optional Interactive Study Sprint Timer Card */}
-                    {msg.showSprintWidget && (
-                      <StudySprintCard
-                        topic={msg.sprintTopic}
-                        initialMinutes={msg.sprintMinutes || 20}
-                      />
-                    )}
-
-                    {/* AI Message Action Footer */}
-                    {msg.sender === 'ai' && (
-                      <View style={styles.aiFooterRow}>
-                        <Text style={styles.timestampText}>{msg.timestamp}</Text>
-                        <View style={styles.aiActionButtons}>
-                          <TouchableOpacity
-                            style={styles.actionIconBtn}
-                            onPress={() => toggleLikeMessage(msg.id)}
-                            activeOpacity={0.7}
-                            accessibilityLabel="Helpful"
-                          >
-                            <ThumbsUp
-                              size={14}
-                              color={likedMessageIds[msg.id] ? Colors.primary : Colors.mutedText}
-                              strokeWidth={1.8}
-                            />
-                          </TouchableOpacity>
-                          <TouchableOpacity
-                            style={styles.actionIconBtn}
-                            onPress={() => handleCopyMessage(msg.id, msg.text)}
-                            activeOpacity={0.7}
-                            accessibilityLabel="Copy response"
-                          >
-                            {copiedMessageId === msg.id ? (
-                              <Check size={14} color={Colors.primary} strokeWidth={2} />
-                            ) : (
-                              <Copy size={14} color={Colors.mutedText} strokeWidth={1.8} />
-                            )}
-                          </TouchableOpacity>
-                        </View>
-                      </View>
-                    )}
-
-                    {/* User Timestamp */}
-                    {msg.sender === 'user' && (
-                      <Text style={styles.userTimestampText}>{msg.timestamp}</Text>
-                    )}
-
-                    {/* Quick Reply Pills */}
-                    {msg.quickReplies && msg.quickReplies.length > 0 && (
-                      <View style={styles.quickRepliesContainer}>
-                        {msg.quickReplies.map((reply, idx) => (
-                          <TouchableOpacity
-                            key={idx}
-                            style={styles.quickReplyPill}
-                            onPress={() => handlePromptSelect(reply)}
-                            activeOpacity={0.7}
-                          >
-                            <Sparkles size={12} color={Colors.primary} strokeWidth={2} />
-                            <Text style={styles.quickReplyText}>{reply}</Text>
-                          </TouchableOpacity>
-                        ))}
-                      </View>
-                    )}
-                  </View>
-                </View>
-              ))}
-
-              {/* Typing / Thinking Indicator */}
-              {isTyping && (
-                <View style={[styles.messageRow, styles.aiRow]}>
-                  <View style={styles.aiBubbleAvatar}>
-                    <Image
-                      source={require('../../assets/bloom-mascot.png')}
-                      style={styles.aiAvatarImg}
-                      resizeMode="contain"
-                    />
-                  </View>
-                  <View style={[styles.messageBubble, styles.aiBubble, styles.typingBubble]}>
-                    <Sparkles size={14} color={Colors.primary} strokeWidth={2} />
-                    <Text style={styles.typingText}>Bloom is reflecting with you...</Text>
-                  </View>
-                </View>
-              )}
-            </View>
-          )}
-
-          {/* Bottom spacing to clear composer */}
+          {/* Spacer */}
           <View style={{ height: 110 }} />
         </ScrollView>
 
-        {/* Floating Bottom Message Composer Dock */}
+        {/* Bottom Interactive Dock */}
         <View
           style={[
-            styles.composerDock,
+            styles.bottomDock,
             { paddingBottom: Math.max(insets.bottom, 12) },
           ]}
         >
-          <View style={styles.composerWrapper}>
-            {/* Plus / Add Action */}
-            <TouchableOpacity
-              style={styles.plusButton}
-              activeOpacity={0.7}
-              onPress={() => handleSendMessage("Can we focus on my priorities today?")}
-              accessibilityLabel="Quick reflection"
-            >
-              <Plus size={19} color={Colors.mutedText} strokeWidth={2.2} />
-            </TouchableOpacity>
-
-            {/* Text Input */}
-            <TextInput
-              style={styles.composerInput}
-              placeholder="Ask Bloom anything..."
-              placeholderTextColor={Colors.lightText}
-              value={inputText}
-              onChangeText={setInputText}
-              onSubmitEditing={() => handleSendMessage()}
-              returnKeyType="send"
-              enablesReturnKeyAutomatically={true}
-            />
-
-            {/* Mic Voice Trigger */}
-            <TouchableOpacity
-              style={styles.micButton}
-              activeOpacity={0.7}
-              onPress={() => handleSendMessage("I'd like to do a voice reflection")}
-              accessibilityLabel="Voice reflection"
-            >
-              <Mic size={18} color={Colors.primary} strokeWidth={2} />
-            </TouchableOpacity>
-
-            {/* Send Button */}
+          <View style={styles.dockInner}>
+            {/* Main Glowing Microphone Button */}
             <TouchableOpacity
               style={[
-                styles.sendButton,
-                inputText.trim().length > 0 && styles.sendButtonActive,
+                styles.micLargeButton,
+                isListening && styles.micLargeButtonActive,
               ]}
-              onPress={() => handleSendMessage()}
-              activeOpacity={0.8}
-              accessibilityLabel="Send message"
+              onPress={handleToggleListening}
+              activeOpacity={0.85}
+              accessibilityLabel={isListening ? 'Stop listening' : 'Start voice chat'}
             >
-              <ArrowUp
-                size={18}
-                color={inputText.trim().length > 0 ? Colors.white : Colors.mutedText}
-                strokeWidth={2.4}
-              />
+              {isListening ? (
+                <MicOff size={22} color="#FFFFFF" strokeWidth={2.4} />
+              ) : (
+                <Mic size={22} color="#FFFFFF" strokeWidth={2.4} />
+              )}
             </TouchableOpacity>
+
+            {/* Compact Text Composer Input */}
+            <View style={styles.textInputHousing}>
+              <TextInput
+                style={styles.textInput}
+                placeholder="Ask or whisper to Bloom..."
+                placeholderTextColor="rgba(210, 227, 219, 0.45)"
+                value={inputText}
+                onChangeText={setInputText}
+                onSubmitEditing={() => processInput(inputText)}
+                returnKeyType="send"
+                enablesReturnKeyAutomatically={true}
+              />
+              <TouchableOpacity
+                style={[
+                  styles.sendButton,
+                  inputText.trim().length > 0 && styles.sendButtonActive,
+                ]}
+                onPress={() => processInput(inputText)}
+                disabled={inputText.trim().length === 0}
+                activeOpacity={0.8}
+              >
+                <Send
+                  size={15}
+                  color={inputText.trim().length > 0 ? '#FFFFFF' : '#52635B'}
+                  strokeWidth={2.2}
+                />
+              </TouchableOpacity>
+            </View>
           </View>
         </View>
       </KeyboardAvoidingView>
+
+      {/* Mobile Voice Input Modal Sheet (Expo Go Helper) */}
+      <Modal
+        visible={mobileVoiceModalVisible}
+        transparent={true}
+        animationType="slide"
+        onRequestClose={() => {
+          setMobileVoiceModalVisible(false);
+          setMascotState('IDLE');
+        }}
+      >
+        <View style={styles.modalBackdrop}>
+          <View style={styles.modalSheet}>
+            <View style={styles.modalHeader}>
+              <View style={styles.modalHeaderTitleGroup}>
+                <Radio size={18} color="#64D2B4" strokeWidth={2.2} />
+                <Text style={styles.modalTitle}>Voice Companion</Text>
+              </View>
+              <TouchableOpacity
+                onPress={() => {
+                  setMobileVoiceModalVisible(false);
+                  setMascotState('IDLE');
+                }}
+                style={styles.modalCloseBtn}
+              >
+                <X size={18} color="#D2E3DB" />
+              </TouchableOpacity>
+            </View>
+
+            <Text style={styles.modalSubtitle}>
+              Choose a voice thought or speak aloud — Bloom will answer with live spoken voice:
+            </Text>
+
+            {/* Waveform indicator */}
+            <View style={styles.waveformContainer}>
+              <Animated.View
+                style={[
+                  styles.waveformBar,
+                  { height: 32, transform: [{ scaleY: voiceWaveAnim }] },
+                ]}
+              />
+              <Animated.View
+                style={[
+                  styles.waveformBar,
+                  { height: 48, transform: [{ scaleY: voiceWaveAnim }] },
+                ]}
+              />
+              <Animated.View
+                style={[
+                  styles.waveformBar,
+                  { height: 24, transform: [{ scaleY: voiceWaveAnim }] },
+                ]}
+              />
+              <Animated.View
+                style={[
+                  styles.waveformBar,
+                  { height: 42, transform: [{ scaleY: voiceWaveAnim }] },
+                ]}
+              />
+              <Animated.View
+                style={[
+                  styles.waveformBar,
+                  { height: 28, transform: [{ scaleY: voiceWaveAnim }] },
+                ]}
+              />
+            </View>
+
+            {/* Quick Sample Voice Prompts */}
+            <View style={styles.samplePromptsList}>
+              {SAMPLE_VOICE_PROMPTS.map((p, i) => (
+                <TouchableOpacity
+                  key={i}
+                  style={styles.samplePromptCard}
+                  onPress={() => {
+                    setMobileVoiceModalVisible(false);
+                    processInput(p);
+                  }}
+                  activeOpacity={0.7}
+                >
+                  <Text style={styles.samplePromptText}>"{p}"</Text>
+                  <ArrowRight size={15} color="#78B29C" />
+                </TouchableOpacity>
+              ))}
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -519,18 +581,18 @@ export default function AICompanionScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#ECFEF3',
+    backgroundColor: '#0B0E1B', // Deep cosmic midnight botanical background
   },
   keyboardContainer: {
     flex: 1,
   },
-  headerBar: {
-    backgroundColor: 'rgba(236, 254, 243, 0.94)',
+  topBar: {
+    backgroundColor: 'rgba(11, 14, 27, 0.92)',
     borderBottomWidth: 1,
-    borderBottomColor: 'rgba(91, 142, 125, 0.1)',
+    borderBottomColor: 'rgba(91, 142, 125, 0.12)',
     zIndex: 10,
   },
-  headerContent: {
+  topBarContent: {
     height: 56,
     flexDirection: 'row',
     alignItems: 'center',
@@ -540,337 +602,133 @@ const styles = StyleSheet.create({
     width: '100%',
     alignSelf: 'center',
   },
-  headerLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  iconButton: {
+  topButton: {
     width: 38,
     height: 38,
     borderRadius: 19,
+    backgroundColor: 'rgba(25, 33, 49, 0.7)',
     justifyContent: 'center',
     alignItems: 'center',
   },
-  headerTitleGroup: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  mascotAvatarSmall: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
-    backgroundColor: Colors.white,
-    justifyContent: 'center',
-    alignItems: 'center',
+  topButtonActive: {
+    backgroundColor: 'rgba(50, 101, 86, 0.65)',
     borderWidth: 1,
-    borderColor: 'rgba(91, 142, 125, 0.15)',
-    overflow: 'hidden',
+    borderColor: '#64D2B4',
   },
-  mascotImgSmall: {
-    width: 28,
-    height: 28,
-  },
-  brandTitleRow: {
-    flexDirection: 'row',
+  brandTitleGroup: {
     alignItems: 'center',
-    gap: 6,
   },
   brandTitleText: {
     ...Typography.body,
-    fontWeight: '700',
-    color: '#101E18',
-    fontSize: 15,
-    letterSpacing: -0.2,
+    fontWeight: '800',
+    fontSize: 16,
+    color: '#F5FFF9',
+    letterSpacing: 0.8,
   },
-  onlineDot: {
-    width: 7,
-    height: 7,
-    borderRadius: 4,
-    backgroundColor: Colors.primary,
-  },
-  brandSubtitleText: {
-    ...Typography.caption,
-    fontSize: 11,
-    color: Colors.mutedText,
-  },
-  headerRight: {
+  brandSubRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 4,
+    gap: 5,
+    marginTop: 2,
   },
-  focusSpaceBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    backgroundColor: '#E2F3E8',
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 9999,
-  },
-  focusPulseDot: {
+  statusIndicatorDot: {
     width: 6,
     height: 6,
     borderRadius: 3,
-    backgroundColor: Colors.primary,
   },
-  focusSpaceText: {
+  brandSubText: {
     ...Typography.caption,
-    fontWeight: '700',
-    color: Colors.primaryDark,
     fontSize: 11,
+    color: '#9CD1BE',
+    fontWeight: '500',
   },
-  scrollView: {
+  topRightControls: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  centerStageScroll: {
     flex: 1,
   },
-  scrollContent: {
+  centerStageContent: {
     paddingHorizontal: 16,
-    paddingTop: 12,
+    paddingTop: 16,
     maxWidth: 720,
     width: '100%',
     alignSelf: 'center',
-  },
-  scrollContentEmpty: {
-    flexGrow: 1,
-    justifyContent: 'center',
-  },
-  emptyStateContainer: {
     alignItems: 'center',
-    paddingVertical: 12,
   },
-  mascotWrapper: {
-    position: 'relative',
-    alignItems: 'center',
-    justifyContent: 'center',
+  mascotContainer: {
     marginVertical: 12,
-  },
-  haloGlow: {
-    position: 'absolute',
-    width: 140,
-    height: 140,
-    borderRadius: 70,
-    backgroundColor: 'rgba(184, 238, 218, 0.35)',
-  },
-  mascotAnimatedContainer: {
-    zIndex: 2,
-  },
-  mascotLarge: {
-    width: 120,
-    height: 120,
-  },
-  welcomeTextGroup: {
     alignItems: 'center',
-    marginBottom: 20,
-    paddingHorizontal: 12,
-  },
-  welcomeTitle: {
-    ...Typography.h1,
-    fontSize: 26,
-    fontWeight: '700',
-    color: '#101E18',
-    letterSpacing: -0.5,
-    textAlign: 'center',
-    marginBottom: 6,
-  },
-  welcomeSubtitle: {
-    ...Typography.body,
-    fontSize: 14,
-    lineHeight: 21,
-    color: Colors.mutedText,
-    textAlign: 'center',
-    maxWidth: 300,
-  },
-  suggestionsContainer: {
-    width: '100%',
-    gap: 10,
-    marginTop: 8,
-  },
-  suggestionsHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 4,
-    marginBottom: 2,
-  },
-  suggestionsLabel: {
-    ...Typography.caption,
-    fontSize: 12,
-    fontWeight: '600',
-    color: Colors.mutedText,
-  },
-  tapToStartPill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-  },
-  tapToStartText: {
-    ...Typography.caption,
-    fontSize: 12,
-    fontWeight: '700',
-    color: Colors.primaryDark,
-  },
-  suggestionCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: Colors.white,
-    padding: 14,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: 'rgba(91, 142, 125, 0.12)',
-    shadowColor: Colors.shadow,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.04,
-    shadowRadius: 6,
-    elevation: 1,
-  },
-  suggestionLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    flex: 1,
-  },
-  suggestionIconBox: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    backgroundColor: '#EAF4EE',
     justifyContent: 'center',
+  },
+  dialogueGlassCard: {
+    width: '100%',
+    backgroundColor: 'rgba(18, 25, 40, 0.82)',
+    borderRadius: 22,
+    padding: 18,
+    borderWidth: 1,
+    borderColor: 'rgba(120, 178, 156, 0.22)',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.35,
+    shadowRadius: 16,
+    elevation: 6,
+    marginTop: 10,
+  },
+  dialogueHeader: {
+    flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 8,
   },
-  suggestionTextGroup: {
-    flex: 1,
-  },
-  suggestionTitle: {
-    ...Typography.body,
-    fontWeight: '700',
-    fontSize: 14,
-    color: '#101E18',
-    marginBottom: 2,
-  },
-  suggestionSubtitle: {
-    ...Typography.caption,
-    fontSize: 12,
-    color: Colors.mutedText,
-  },
-  chatThread: {
-    gap: 16,
-    paddingTop: 8,
-  },
-  dayDivider: {
+  dialogueSpeakerBadge: {
+    flexDirection: 'row',
     alignItems: 'center',
-    marginVertical: 6,
-  },
-  dayDividerBadge: {
-    backgroundColor: '#E2F0E7',
-    paddingHorizontal: 12,
-    paddingVertical: 4,
+    gap: 6,
+    backgroundColor: 'rgba(50, 101, 86, 0.4)',
+    paddingHorizontal: 10,
+    paddingVertical: 3,
     borderRadius: 9999,
   },
-  dayDividerText: {
+  dialogueSpeakerText: {
     ...Typography.caption,
     fontSize: 11,
-    color: Colors.mutedText,
-    fontWeight: '600',
+    fontWeight: '700',
+    color: '#B8EEDA',
   },
-  messageRow: {
+  interruptButton: {
     flexDirection: 'row',
-    marginVertical: 2,
-  },
-  userRow: {
-    justifyContent: 'flex-end',
-  },
-  aiRow: {
-    justifyContent: 'flex-start',
-    gap: 8,
-  },
-  aiBubbleAvatar: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: Colors.white,
-    justifyContent: 'center',
     alignItems: 'center',
+    gap: 6,
+    backgroundColor: 'rgba(186, 26, 26, 0.3)',
     borderWidth: 1,
-    borderColor: 'rgba(91, 142, 125, 0.15)',
-    overflow: 'hidden',
-    marginTop: 2,
+    borderColor: 'rgba(255, 218, 214, 0.4)',
+    paddingHorizontal: 10,
+    paddingVertical: 3,
+    borderRadius: 9999,
   },
-  aiAvatarImg: {
-    width: 26,
-    height: 26,
+  interruptText: {
+    ...Typography.caption,
+    fontSize: 10,
+    color: '#FFDAD6',
+    fontWeight: '700',
   },
-  messageBubble: {
-    borderRadius: 20,
-    padding: 14,
-    maxWidth: '86%',
-    shadowColor: Colors.shadow,
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.04,
-    shadowRadius: 4,
-    elevation: 1,
-  },
-  userBubble: {
-    backgroundColor: '#326556',
-    borderTopRightRadius: 4,
-    alignSelf: 'flex-end',
-  },
-  aiBubble: {
-    backgroundColor: Colors.white,
-    borderTopLeftRadius: 4,
-    borderWidth: 1,
-    borderColor: 'rgba(91, 142, 125, 0.12)',
-    flex: 1,
-  },
-  messageText: {
+  dialogueBodyText: {
     ...Typography.body,
-    fontSize: 14,
-    lineHeight: 22,
-  },
-  userText: {
-    color: Colors.white,
-  },
-  aiText: {
-    color: '#101E18',
-  },
-  userTimestampText: {
-    ...Typography.caption,
-    fontSize: 10,
-    color: 'rgba(255, 255, 255, 0.7)',
-    alignSelf: 'flex-end',
-    marginTop: 4,
-  },
-  aiFooterRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginTop: 8,
-    paddingTop: 4,
-  },
-  timestampText: {
-    ...Typography.caption,
-    fontSize: 10,
-    color: Colors.lightText,
-  },
-  aiActionButtons: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-  },
-  actionIconBtn: {
-    width: 26,
-    height: 26,
-    borderRadius: 13,
-    justifyContent: 'center',
-    alignItems: 'center',
+    fontSize: 15,
+    lineHeight: 24,
+    color: '#E3F5EA',
   },
   stepsContainer: {
-    backgroundColor: '#F3F8F5',
+    backgroundColor: 'rgba(11, 16, 28, 0.65)',
     padding: 12,
     borderRadius: 14,
     gap: 8,
-    marginVertical: 10,
+    marginVertical: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(91, 142, 125, 0.15)',
   },
   stepRow: {
     flexDirection: 'row',
@@ -881,119 +739,200 @@ const styles = StyleSheet.create({
     width: 20,
     height: 20,
     borderRadius: 10,
-    backgroundColor: '#B8EEDA',
+    backgroundColor: '#326556',
     justifyContent: 'center',
     alignItems: 'center',
-    marginTop: 1,
+    marginTop: 2,
   },
   stepBadgeText: {
     fontSize: 11,
     fontWeight: '700',
-    color: '#002018',
+    color: '#FFFFFF',
   },
   stepText: {
     ...Typography.bodySmall,
     fontSize: 13,
-    color: '#101E18',
+    color: '#D2E3DB',
     flex: 1,
     lineHeight: 18,
   },
   stepTitleBold: {
     fontWeight: '700',
+    color: '#B8EEDA',
   },
-  quickRepliesContainer: {
+  sprintCardWrapper: {
+    marginTop: 10,
+  },
+  quickRepliesRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 6,
-    marginTop: 10,
+    gap: 8,
+    marginTop: 14,
+    paddingTop: 10,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(91, 142, 125, 0.12)',
   },
   quickReplyPill: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    backgroundColor: '#EAF3ED',
+    backgroundColor: 'rgba(30, 42, 60, 0.85)',
     paddingHorizontal: 12,
-    paddingVertical: 6,
+    paddingVertical: 7,
     borderRadius: 9999,
+    borderWidth: 1,
+    borderColor: 'rgba(120, 178, 156, 0.25)',
   },
-  quickReplyText: {
+  quickReplyPillText: {
     ...Typography.caption,
     fontSize: 12,
+    color: '#D2E3DB',
     fontWeight: '600',
-    color: Colors.primaryDark,
   },
-  typingBubble: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    paddingVertical: 12,
-  },
-  typingText: {
-    ...Typography.bodySmall,
-    color: Colors.mutedText,
-    fontStyle: 'italic',
-  },
-  composerDock: {
+  bottomDock: {
     position: 'absolute',
     bottom: 0,
     left: 0,
     right: 0,
-    backgroundColor: 'transparent',
+    backgroundColor: 'rgba(11, 14, 27, 0.95)',
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(91, 142, 125, 0.12)',
     paddingHorizontal: 16,
-    paddingTop: 8,
+    paddingTop: 10,
   },
-  composerWrapper: {
+  dockInner: {
     maxWidth: 720,
     width: '100%',
     alignSelf: 'center',
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: Colors.white,
-    borderRadius: 9999,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    shadowColor: Colors.shadow,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.08,
-    shadowRadius: 14,
-    elevation: 6,
-    borderWidth: 1,
-    borderColor: 'rgba(91, 142, 125, 0.15)',
-    gap: 6,
+    gap: 10,
   },
-  plusButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: '#F3F6F4',
+  micLargeButton: {
+    width: 46,
+    height: 46,
+    borderRadius: 23,
+    backgroundColor: '#326556',
     justifyContent: 'center',
     alignItems: 'center',
+    shadowColor: '#64D2B4',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 4,
   },
-  composerInput: {
+  micLargeButtonActive: {
+    backgroundColor: '#BA1A1A',
+    shadowColor: '#FFDAD6',
+  },
+  textInputHousing: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(21, 29, 46, 0.9)',
+    borderRadius: 9999,
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    borderWidth: 1,
+    borderColor: 'rgba(91, 142, 125, 0.2)',
+  },
+  textInput: {
     flex: 1,
     ...Typography.body,
     fontSize: 14,
-    color: '#101E18',
-    paddingHorizontal: 6,
+    color: '#F5FFF9',
     paddingVertical: 8,
-  },
-  micButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: '#EBF4EF',
-    justifyContent: 'center',
-    alignItems: 'center',
+    paddingHorizontal: 6,
   },
   sendButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: '#E1E9E4',
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: 'rgba(35, 47, 70, 0.7)',
     justifyContent: 'center',
     alignItems: 'center',
   },
   sendButtonActive: {
     backgroundColor: '#326556',
+  },
+  modalBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.65)',
+    justifyContent: 'flex-end',
+  },
+  modalSheet: {
+    backgroundColor: '#121828',
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    padding: 20,
+    borderWidth: 1,
+    borderColor: 'rgba(120, 178, 156, 0.25)',
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+  },
+  modalHeaderTitleGroup: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  modalTitle: {
+    ...Typography.body,
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#F5FFF9',
+  },
+  modalCloseBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalSubtitle: {
+    ...Typography.caption,
+    fontSize: 13,
+    color: '#9CD1BE',
+    lineHeight: 18,
+    marginBottom: 16,
+  },
+  waveformContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    height: 52,
+    marginBottom: 16,
+  },
+  waveformBar: {
+    width: 5,
+    borderRadius: 3,
+    backgroundColor: '#64D2B4',
+  },
+  samplePromptsList: {
+    gap: 8,
+    marginBottom: 12,
+  },
+  samplePromptCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: 'rgba(23, 33, 52, 0.8)',
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(91, 142, 125, 0.2)',
+  },
+  samplePromptText: {
+    ...Typography.bodySmall,
+    color: '#E3F5EA',
+    fontSize: 13,
+    flex: 1,
+    marginRight: 8,
   },
 });

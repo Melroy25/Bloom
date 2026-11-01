@@ -1,13 +1,22 @@
 // AI Companion Service for BLOOM
-// Architecture note: Provides gentle, student-focused wellness and study reflections.
-// When an external backend (e.g. Gemini API / Cloud Functions) is configured,
-// replace the mock generator function with your API call without breaking UI contracts.
+// Provides gentle student-wellness reflections, emotional intent analysis,
+// and state-driven responses.
+
+export type MascotState =
+  | 'IDLE'
+  | 'HAPPY'
+  | 'LISTENING'
+  | 'THINKING'
+  | 'SPEAKING'
+  | 'COMFORTING'
+  | 'ERROR';
 
 export interface ChatMessage {
   id: string;
   sender: 'user' | 'ai';
   text: string;
   timestamp: string;
+  emotion?: MascotState;
   steps?: { stepNumber: number; title: string; detail: string }[];
   showSprintWidget?: boolean;
   sprintTopic?: string;
@@ -26,18 +35,18 @@ export const INITIAL_SUGGESTIONS = [
   {
     id: 'stressed',
     title: "I'm feeling stressed",
-    subtitle: 'Quick breathing & mindful reflection',
+    subtitle: 'Quick breathing & mindful reset',
     prompt: "I'm feeling stressed with my studies right now. Can we do a gentle calming reset?",
     icon: 'spa',
-    category: 'wellness',
+    emotion: 'COMFORTING' as MascotState,
   },
   {
     id: 'focus',
     title: 'Help me focus',
-    subtitle: 'Set a relaxed 20-min pacing sprint',
-    prompt: 'Help me stay focused. Can we set up a gentle 20-minute study sprint on Bio Chapter 4?',
+    subtitle: 'Start a 20-min pacing sprint',
+    prompt: 'Help me stay focused. Can we set up a gentle 20-minute study sprint?',
     icon: 'timer',
-    category: 'study',
+    emotion: 'HAPPY' as MascotState,
   },
   {
     id: 'talk',
@@ -45,7 +54,7 @@ export const INITIAL_SUGGESTIONS = [
     subtitle: 'Open, unhurried space for any thoughts',
     prompt: 'Can we just chat freely about what is on my mind today?',
     icon: 'chat',
-    category: 'general',
+    emotion: 'HAPPY' as MascotState,
   },
 ];
 
@@ -64,41 +73,10 @@ export const RECENT_CHECK_INS: ConversationThread[] = [
       {
         id: 'm2',
         sender: 'ai',
-        text: "Take a deep breath with me for a moment. 🌿 It's completely normal to feel that rush when deadlines overlap.\n\nLet's break this down into bite-sized momentum:",
+        text: "Take a deep breath with me for a moment. 🌿 It's completely normal to feel that rush when deadlines overlap.\n\nLet's break this down into bite-sized momentum:\n1. Pick just one topic for 20 minutes.\n2. Hide everything else.\n3. Celebrate your small win.",
         timestamp: '2:42 PM',
-        steps: [
-          {
-            stepNumber: 1,
-            title: 'Pick just one topic',
-            detail: 'for a 20-minute low-pressure review.',
-          },
-          {
-            stepNumber: 2,
-            title: 'Hide everything else',
-            detail: 'so your eyes only see one task.',
-          },
-          {
-            stepNumber: 3,
-            title: 'Quick check-in right after',
-            detail: 'to celebrate your small win.',
-          },
-        ],
+        emotion: 'COMFORTING',
         quickReplies: ['Review Bio notes', 'Try 3-min breathing', 'Build timetable'],
-      },
-      {
-        id: 'm3',
-        sender: 'user',
-        text: "Bio feels a bit easier. Let's do a 20-minute sprint on Chapter 4.",
-        timestamp: '2:45 PM',
-      },
-      {
-        id: 'm4',
-        sender: 'ai',
-        text: "Perfect! ⏱️ Starting your gentle 20-minute Bio sprint. I'll hold your focus space quietly until 3:05 PM.",
-        timestamp: '2:45 PM',
-        showSprintWidget: true,
-        sprintTopic: 'Bio Chapter 4',
-        sprintMinutes: 20,
       },
     ],
   },
@@ -116,29 +94,10 @@ export const RECENT_CHECK_INS: ConversationThread[] = [
       {
         id: 'm2-2',
         sender: 'ai',
-        text: 'You worked hard today. 🌱 Let your shoulders drop away from your ears. Take a slow 4-count breath in... hold for 4... and exhale softly for 6. How is your jaw and neck feeling?',
+        text: 'You worked hard today. 🌱 Let your shoulders drop away from your ears. Take a slow 4-count breath in... hold for 4... and exhale softly for 6.',
         timestamp: '8:16 PM',
+        emotion: 'COMFORTING',
         quickReplies: ['Feeling lighter', 'Still tense', 'Going to sleep'],
-      },
-    ],
-  },
-  {
-    id: 'checkin-3',
-    title: 'Drafting essay outline',
-    lastUpdated: 'Nov 10, 4:30 PM',
-    messages: [
-      {
-        id: 'm3-1',
-        sender: 'user',
-        text: 'Need to structure my history essay thesis on industrialization.',
-        timestamp: '4:30 PM',
-      },
-      {
-        id: 'm3-2',
-        sender: 'ai',
-        text: "Let's capture the core argument in one single sentence first. What was the most surprising consequence of that period for you?",
-        timestamp: '4:31 PM',
-        quickReplies: ['Economic shifts', 'Social movements', 'Technological pace'],
       },
     ],
   },
@@ -155,24 +114,82 @@ export function getFormattedTime(): string {
   return `${hours}:${minutesStr} ${ampm}`;
 }
 
+/**
+ * Maps user input text to an emotional expression for the mascot
+ */
+export function detectEmotionFromContext(text: string): MascotState {
+  const lower = text.toLowerCase();
+
+  if (
+    lower.includes('stress') ||
+    lower.includes('anxious') ||
+    lower.includes('overwhelm') ||
+    lower.includes('scared') ||
+    lower.includes('tired') ||
+    lower.includes('sad') ||
+    lower.includes('panic') ||
+    lower.includes('calm') ||
+    lower.includes('breath')
+  ) {
+    return 'COMFORTING';
+  }
+
+  if (
+    lower.includes('hello') ||
+    lower.includes('hey') ||
+    lower.includes('hi') ||
+    lower.includes('happy') ||
+    lower.includes('yay') ||
+    lower.includes('great') ||
+    lower.includes('good') ||
+    lower.includes('awesome') ||
+    lower.includes('thank')
+  ) {
+    return 'HAPPY';
+  }
+
+  if (
+    lower.includes('why') ||
+    lower.includes('how') ||
+    lower.includes('what') ||
+    lower.includes('think') ||
+    lower.includes('focus') ||
+    lower.includes('plan')
+  ) {
+    return 'THINKING';
+  }
+
+  return 'IDLE';
+}
+
+/**
+ * Generates companion response with emotional metadata
+ */
 export async function generateCompanionResponse(userText: string): Promise<ChatMessage> {
   // Simulate natural reflective typing delay
-  await new Promise((resolve) => setTimeout(resolve, 950));
+  await new Promise((resolve) => setTimeout(resolve, 900));
 
   const lower = userText.toLowerCase();
   const time = getFormattedTime();
   const id = 'msg-' + Date.now();
 
   // If user asks about focus / sprint / timer
-  if (lower.includes('focus') || lower.includes('sprint') || lower.includes('timer') || lower.includes('25-min') || lower.includes('20-min')) {
+  if (
+    lower.includes('focus') ||
+    lower.includes('sprint') ||
+    lower.includes('timer') ||
+    lower.includes('25-min') ||
+    lower.includes('20-min')
+  ) {
     const topicMatch = userText.match(/(?:on|about|for)\s+([a-zA-Z0-9\s]+?)(?:\?|\.|$)/i);
-    const topic = topicMatch ? topicMatch[1].trim() : 'Focus Session';
+    const topic = topicMatch ? topicMatch[1].trim() : 'Focus Sprint';
 
     return {
       id,
       sender: 'ai',
-      text: `Perfect! ⏱️ Starting your gentle 20-minute focus sprint on "${topic}". I'll keep your space serene and quiet so you can get into flow.`,
+      text: `Starting your gentle 20-minute focus sprint on ${topic}. I will keep your space serene and quiet so you can find your flow.`,
       timestamp: time,
+      emotion: 'HAPPY',
       showSprintWidget: true,
       sprintTopic: topic.length > 24 ? topic.substring(0, 24) + '...' : topic,
       sprintMinutes: 20,
@@ -180,13 +197,20 @@ export async function generateCompanionResponse(userText: string): Promise<ChatM
     };
   }
 
-  // If user asks about stress / overwhelm / calming
-  if (lower.includes('stress') || lower.includes('overwhelm') || lower.includes('anxious') || lower.includes('reset') || lower.includes('tired')) {
+  // If user asks about stress / overwhelm / anxiety
+  if (
+    lower.includes('stress') ||
+    lower.includes('overwhelm') ||
+    lower.includes('anxious') ||
+    lower.includes('reset') ||
+    lower.includes('tired')
+  ) {
     return {
       id,
       sender: 'ai',
-      text: "I hear you. Take a slow, deep breath with me right now. 🌿 Remember: you don't have to carry every exam and assignment all at once.\n\nHere is a gentle 3-step reset:",
+      text: "Take a slow, deep breath with me right now. 🌿 You don't have to carry every deadline at once. Drop your shoulders, take a sip of water, and pick just one small task for 15 minutes.",
       timestamp: time,
+      emotion: 'COMFORTING',
       steps: [
         {
           stepNumber: 1,
@@ -213,18 +237,32 @@ export async function generateCompanionResponse(userText: string): Promise<ChatM
     return {
       id,
       sender: 'ai',
-      text: "Let's do a soothing box-breath together:\n\n1. Inhale gently for 4 counts...\n2. Hold peacefully for 4 counts...\n3. Exhale smoothly for 4 counts...\n4. Rest empty for 4 counts.\n\nFeel that lightness returning? Whenever you're ready, we can return to your tasks.",
+      text: "Let's do a soothing box-breath together. Inhale gently for 4... hold peacefully for 4... exhale smoothly for 4... and rest empty for 4. Feel that gentle lightness returning?",
       timestamp: time,
+      emotion: 'COMFORTING',
       quickReplies: ['Repeat breath', "I'm ready to study", 'Feeling calmer'],
     };
   }
 
-  // Default friendly mindful companion response
+  // Greetings
+  if (lower.includes('hello') || lower.includes('hi') || lower.includes('hey')) {
+    return {
+      id,
+      sender: 'ai',
+      text: "Hey there! 🌱 I'm Bloom, your mindful companion. I'm right here with you whenever you need to reflect, plan your studies, or simply take a breather.",
+      timestamp: time,
+      emotion: 'HAPPY',
+      quickReplies: ['Help me focus', "I'm feeling stressed", "Let's talk"],
+    };
+  }
+
+  // Default friendly mindful response
   return {
     id,
     sender: 'ai',
-    text: `Thank you for sharing that with me 🌱. I'm right here with you. Studying and growing works best when you take things one step at a time at your own natural pace.\n\nWhat would feel most restorative or helpful to focus on next?`,
+    text: "Thank you for sharing that with me 🌱. Studying and growing works best when you take things one step at a time at your own natural pace. What would feel most helpful to focus on next?",
     timestamp: time,
+    emotion: 'HAPPY',
     quickReplies: ['Help me prioritize', 'Start a focus sprint', 'Tips to unwind'],
   };
 }
