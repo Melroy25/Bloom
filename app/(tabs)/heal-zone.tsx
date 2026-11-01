@@ -398,12 +398,7 @@ export default function HealZoneScreen() {
             {/* CARD 3 — PLAY WITH ME */}
             <TouchableOpacity
               style={[styles.featureCard, Shadows.sm]}
-              onPress={() =>
-                router.push({
-                  pathname: '/games' as any,
-                  params: { from: '/heal-zone' },
-                })
-              }
+              onPress={() => router.push('/games')}
               activeOpacity={0.82}
             >
               <View style={[styles.cardIconCircle, { backgroundColor: Colors.lavender }]}>
@@ -422,12 +417,7 @@ export default function HealZoneScreen() {
             {/* CARD 4 — RELAX WITH ME */}
             <TouchableOpacity
               style={[styles.featureCard, Shadows.sm]}
-              onPress={() =>
-                router.push({
-                  pathname: '/music' as any,
-                  params: { from: '/heal-zone' },
-                })
-              }
+              onPress={() => router.push('/music')}
               activeOpacity={0.82}
             >
               <View style={[styles.cardIconCircle, { backgroundColor: Colors.softBlue }]}>
