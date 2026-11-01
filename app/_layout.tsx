@@ -44,11 +44,43 @@ export default function RootLayout() {
           options={{ headerShown: false, animation: 'slide_from_right' }}
         />
         <Stack.Screen
-          name="games"
+          name="games/index"
+          options={{ headerShown: false, animation: 'slide_from_right' }}
+        />
+        <Stack.Screen
+          name="games/choose"
+          options={{ headerShown: false, animation: 'slide_from_right' }}
+        />
+        <Stack.Screen
+          name="games/difficulty"
+          options={{ headerShown: false, animation: 'slide_from_right' }}
+        />
+        <Stack.Screen
+          name="games/memory-match"
+          options={{ headerShown: false, animation: 'slide_from_right' }}
+        />
+        <Stack.Screen
+          name="games/word-detective/choose"
+          options={{ headerShown: false, animation: 'slide_from_right' }}
+        />
+        <Stack.Screen
+          name="games/word-detective/difficulty"
+          options={{ headerShown: false, animation: 'slide_from_right' }}
+        />
+        <Stack.Screen
+          name="games/word-detective/play"
+          options={{ headerShown: false, animation: 'slide_from_right' }}
+        />
+        <Stack.Screen
+          name="memory-match"
           options={{ headerShown: false, animation: 'slide_from_right' }}
         />
         <Stack.Screen
           name="music"
+          options={{ headerShown: false, animation: 'slide_from_right' }}
+        />
+        <Stack.Screen
+          name="music/index"
           options={{ headerShown: false, animation: 'slide_from_right' }}
         />
       </Stack>
