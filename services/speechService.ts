@@ -1,5 +1,6 @@
 // Speech Service for BLOOM AI Companion
-// Provides cross-platform Text-To-Speech (via expo-speech) and Web Speech Recognition
+// High-reliability Text-To-Speech (TTS) and Speech-To-Text (STT)
+// Works across Web, Android, iOS, and Expo Go
 
 import * as Speech from 'expo-speech';
 import { Platform } from 'react-native';
@@ -12,11 +13,47 @@ export interface SpeechRecognitionCallbacks {
 }
 
 class SpeechService {
-  private activeRecognition: any = null;
   private isCurrentlySpeaking: boolean = false;
+  private activeRecognition: any = null;
+  private isAudioUnlocked: boolean = false;
+  private stopTimeout: any = null;
+
+  constructor() {
+    // Warm up Web Speech Synthesis voices if on web
+    if (Platform.OS === 'web' && typeof window !== 'undefined' && 'speechSynthesis' in window) {
+      try {
+        window.speechSynthesis.getVoices();
+        if (typeof window.speechSynthesis.onvoiceschanged !== 'undefined') {
+          window.speechSynthesis.onvoiceschanged = () => {
+            window.speechSynthesis.getVoices();
+          };
+        }
+      } catch {}
+    }
+  }
 
   /**
-   * Speak given text aloud using expo-speech
+   * Unlock browser audio playback on user gesture
+   */
+  public unlockAudio(): void {
+    if (this.isAudioUnlocked) return;
+    if (Platform.OS === 'web' && typeof window !== 'undefined' && 'speechSynthesis' in window) {
+      try {
+        window.speechSynthesis.resume();
+        // Speak a silent micro-utterance to unlock audio policy in Chrome/Safari
+        const silentUtterance = new SpeechSynthesisUtterance(' ');
+        silentUtterance.volume = 0.01;
+        silentUtterance.rate = 10;
+        window.speechSynthesis.speak(silentUtterance);
+        this.isAudioUnlocked = true;
+      } catch {}
+    } else {
+      this.isAudioUnlocked = true;
+    }
+  }
+
+  /**
+   * Speak given text aloud with guaranteed playback and error resilience
    */
   public async speak(
     text: string,
@@ -25,14 +62,14 @@ class SpeechService {
     onError?: (err: any) => void
   ): Promise<void> {
     try {
-      // Stop any prior speech before beginning
-      await this.stopSpeaking();
-
-      // Clean markdown or emojis for smoother natural speech
+      // 1. Clean markdown, emojis, asterisks for natural speech
       const cleanText = text
-        .replace(/[🌱✨⏱️🌸🌿💬]/g, '')
+        .replace(/[🌱✨⏱️🌸🌿💬🎙️❤️⭐]/g, '')
         .replace(/\*\*(.*?)\*\*/g, '$1')
         .replace(/\*(.*?)\*/g, '$1')
+        .replace(/#+/g, '')
+        .replace(/`+/g, '')
+        .replace(/\n+/g, '. ')
         .trim();
 
       if (!cleanText) {
@@ -40,30 +77,95 @@ class SpeechService {
         return;
       }
 
+      // 2. Stop any previous speech
+      await this.stopSpeaking();
+
+      // Brief delay to allow native and browser audio threads to clear previous utterance
+      await new Promise((resolve) => setTimeout(resolve, 80));
+
       this.isCurrentlySpeaking = true;
 
-      Speech.speak(cleanText, {
-        language: 'en-US',
-        pitch: 1.15, // Friendly, warm companion pitch
-        rate: 0.95,  // Gentle, calm pacing
-        onStart: () => {
+      // Web platform custom resilient driver (bypasses Expo-Speech web quirks and Chrome GC bug)
+      if (Platform.OS === 'web' && typeof window !== 'undefined' && 'speechSynthesis' in window) {
+        window.speechSynthesis.cancel();
+        window.speechSynthesis.resume();
+
+        const utterance = new SpeechSynthesisUtterance(cleanText);
+        utterance.lang = 'en-US';
+        utterance.pitch = 1.12; // Friendly companion pitch
+        utterance.rate = 0.96;  // Calm, relaxed student pacing
+        utterance.volume = 1.0;
+
+        // Choose best natural voice if available
+        const voices = window.speechSynthesis.getVoices() || [];
+        const preferredVoice = voices.find(
+          (v) =>
+            v.lang.startsWith('en') &&
+            (v.name.includes('Natural') ||
+              v.name.includes('Samantha') ||
+              v.name.includes('Jenny') ||
+              v.name.includes('Google US') ||
+              v.name.includes('Zira') ||
+              v.name.includes('Aria'))
+        ) || voices.find((v) => v.lang.startsWith('en'));
+
+        if (preferredVoice) {
+          utterance.voice = preferredVoice;
+        }
+
+        utterance.onstart = () => {
           this.isCurrentlySpeaking = true;
           onStart?.();
-        },
-        onDone: () => {
+        };
+
+        utterance.onend = () => {
           this.isCurrentlySpeaking = false;
+          (window as any).__bloomActiveUtterance = null;
           onDone?.();
-        },
-        onStopped: () => {
+        };
+
+        utterance.onerror = (e) => {
+          // 'canceled' or 'interrupted' is normal when user taps pause
+          if (e.error !== 'canceled' && e.error !== 'interrupted') {
+            console.warn('[BLOOM Speech] Web synthesis error:', e);
+            onError?.(e);
+          }
           this.isCurrentlySpeaking = false;
+          (window as any).__bloomActiveUtterance = null;
           onDone?.();
-        },
-        onError: (err) => {
-          this.isCurrentlySpeaking = false;
-          onError?.(err);
-        },
-      });
+        };
+
+        // Pin to window to prevent Chrome Garbage Collector from cutting speech early
+        (window as any).__bloomActiveUtterance = utterance;
+
+        window.speechSynthesis.speak(utterance);
+      } else {
+        // Native Android / iOS via expo-speech
+        Speech.speak(cleanText, {
+          language: 'en-US',
+          pitch: 1.08,
+          rate: 0.95,
+          onStart: () => {
+            this.isCurrentlySpeaking = true;
+            onStart?.();
+          },
+          onDone: () => {
+            this.isCurrentlySpeaking = false;
+            onDone?.();
+          },
+          onStopped: () => {
+            this.isCurrentlySpeaking = false;
+            onDone?.();
+          },
+          onError: (err) => {
+            console.warn('[BLOOM Speech] Native speech error:', err);
+            this.isCurrentlySpeaking = false;
+            onError?.(err);
+          },
+        });
+      }
     } catch (error) {
+      console.warn('[BLOOM Speech] speak() exception:', error);
       this.isCurrentlySpeaking = false;
       onError?.(error);
     }
@@ -75,6 +177,10 @@ class SpeechService {
   public async stopSpeaking(): Promise<void> {
     try {
       this.isCurrentlySpeaking = false;
+      if (Platform.OS === 'web' && typeof window !== 'undefined' && 'speechSynthesis' in window) {
+        window.speechSynthesis.cancel();
+        (window as any).__bloomActiveUtterance = null;
+      }
       await Speech.stop();
     } catch {
       // Silent catch
@@ -85,20 +191,24 @@ class SpeechService {
    * Check if speech is currently playing
    */
   public isSpeaking(): boolean {
+    if (Platform.OS === 'web' && typeof window !== 'undefined' && 'speechSynthesis' in window) {
+      return window.speechSynthesis.speaking || this.isCurrentlySpeaking;
+    }
     return this.isCurrentlySpeaking;
   }
 
   /**
    * Start capturing speech from microphone
-   * Supports Web Speech API natively in browsers, and provides a clear status callback
    */
   public startListening(callbacks: SpeechRecognitionCallbacks): boolean {
+    this.unlockAudio();
+
     if (Platform.OS === 'web' && typeof window !== 'undefined') {
       const SpeechRecognition =
         (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
 
       if (!SpeechRecognition) {
-        callbacks.onError?.('Speech recognition is not supported in this browser. Please use Chrome or Edge.');
+        callbacks.onError?.('Web Speech API is not supported in this browser. Please use Chrome or Edge.');
         return false;
       }
 
@@ -141,7 +251,6 @@ class SpeechService {
       }
     } else {
       // Mobile Expo Go mode
-      // Native SpeechRecognition requires custom dev client, so we notify caller
       callbacks.onError?.('MOBILE_EXPO_GO_VOICE');
       return false;
     }

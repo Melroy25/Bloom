@@ -22,39 +22,33 @@ import {
   MicOff,
   Volume2,
   VolumeX,
-  Square,
   Sparkles,
-  ArrowRight,
-  Heart,
-  Leaf,
-  Timer,
-  MessageSquare,
-  X,
   Radio,
+  X,
+  ArrowRight,
+  Play,
+  Square,
+  AlertCircle,
 } from 'lucide-react-native';
 import { Colors } from '../../constants/colors';
 import { Typography } from '../../constants/typography';
 import {
   MascotState,
-  ChatMessage,
-  INITIAL_SUGGESTIONS,
   ConversationThread,
   generateCompanionResponse,
   detectEmotionFromContext,
-  getFormattedTime,
 } from '../../services/aiCompanionService';
 import { speechService } from '../../services/speechService';
 import { AnimatedMascot } from '../../components/ai/AnimatedMascot';
 import { SidebarDrawer } from '../../components/ai/SidebarDrawer';
-import { StudySprintCard } from '../../components/ai/StudySprintCard';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
 const SAMPLE_VOICE_PROMPTS = [
-  "I'm feeling really anxious about my finals",
-  "Help me focus with a 20-minute study sprint",
-  "Can we do a gentle box-breathing exercise?",
-  "How can I pace my study time today without burnout?",
+  "I'm feeling anxious about finals",
+  "Help me focus with a 20-min sprint",
+  "Can we do a gentle breathing reset?",
+  "How can I pace my study time today?",
 ];
 
 export default function AICompanionScreen() {
@@ -62,43 +56,42 @@ export default function AICompanionScreen() {
 
   // State
   const [mascotState, setMascotState] = useState<MascotState>('IDLE');
-  const [isVoiceMode, setIsVoiceMode] = useState<boolean>(true); // Spoken audio playback enabled
+  const [isVoiceMode, setIsVoiceMode] = useState<boolean>(true); // Voice spoken output toggle
   const [isListening, setIsListening] = useState<boolean>(false);
   const [inputText, setInputText] = useState<string>('');
-  const [activeSpeechText, setActiveSpeechText] = useState<string>(
-    "Hello! 🌱 I'm Bloom. Tap me, speak into the mic, or type below. I'm right here with you."
-  );
-  const [activeSpeaker, setActiveSpeaker] = useState<'ai' | 'user'>('ai');
-  const [activeSteps, setActiveSteps] = useState<any[] | null>(null);
-  const [showSprintWidget, setShowSprintWidget] = useState<boolean>(false);
-  const [sprintTopic, setSprintTopic] = useState<string>('Focus Sprint');
-  const [quickReplies, setQuickReplies] = useState<string[]>([
-    "I'm feeling stressed",
-    'Help me focus',
-    "Let's talk",
-  ]);
+  const [recentUserQuery, setRecentUserQuery] = useState<string | null>(null);
+  const [activeResponseText, setActiveResponseText] = useState<string | null>(null);
+  const [speechError, setSpeechError] = useState<string | null>(null);
 
   // Sidebar
   const [sidebarOpen, setSidebarOpen] = useState<boolean>(false);
   const [activeThreadId, setActiveThreadId] = useState<string | undefined>(undefined);
 
-  // Mobile voice prompt sheet (when native web speech recognition is unavailable in Expo Go)
+  // Mobile voice modal (fallback for Expo Go when Web Speech API is absent)
   const [mobileVoiceModalVisible, setMobileVoiceModalVisible] = useState<boolean>(false);
   const [voiceWaveAnim] = useState(new Animated.Value(0.3));
 
-  // Voice waveform pulse animation
+  // Stop speech if screen unmounts
+  useEffect(() => {
+    return () => {
+      speechService.stopSpeaking();
+      speechService.stopListening();
+    };
+  }, []);
+
+  // Voice wave animation for listening modal
   useEffect(() => {
     if (isListening || mobileVoiceModalVisible) {
       const loop = Animated.loop(
         Animated.sequence([
           Animated.timing(voiceWaveAnim, {
             toValue: 1,
-            duration: 400,
+            duration: 380,
             useNativeDriver: true,
           }),
           Animated.timing(voiceWaveAnim, {
             toValue: 0.3,
-            duration: 400,
+            duration: 380,
             useNativeDriver: true,
           }),
         ])
@@ -108,62 +101,58 @@ export default function AICompanionScreen() {
     }
   }, [isListening, mobileVoiceModalVisible, voiceWaveAnim]);
 
-  // Process and deliver AI response
-  const processInput = async (userInput: string) => {
-    const trimmed = userInput.trim();
+  // Main processing pipeline for user input
+  const processMessage = async (text: string) => {
+    const trimmed = text.trim();
     if (!trimmed) return;
 
-    // Stop any ongoing speech
+    // Unlock browser audio policy immediately on user gesture
+    speechService.unlockAudio();
     await speechService.stopSpeaking();
 
-    // Show user message in dialogue
-    setActiveSpeaker('user');
-    setActiveSpeechText(trimmed);
+    setRecentUserQuery(trimmed);
     setInputText('');
+    setSpeechError(null);
 
-    // Emotional reaction based on user query
-    const emotion = detectEmotionFromContext(trimmed);
+    // Emotional reaction & Thinking state
+    const targetEmotion = detectEmotionFromContext(trimmed);
     setMascotState('THINKING');
 
     try {
       const response = await generateCompanionResponse(trimmed);
-
-      // Transition to speaking
-      setActiveSpeaker('ai');
-      setActiveSpeechText(response.text);
-      setActiveSteps(response.steps || null);
-      setShowSprintWidget(!!response.showSprintWidget);
-      if (response.sprintTopic) setSprintTopic(response.sprintTopic);
-      if (response.quickReplies) setQuickReplies(response.quickReplies);
+      setActiveResponseText(response.text);
 
       if (isVoiceMode) {
         setMascotState('SPEAKING');
+
         await speechService.speak(
           response.text,
           () => {
             setMascotState('SPEAKING');
           },
           () => {
-            // Settle into appropriate resting emotion (COMFORTING or IDLE)
             setMascotState(response.emotion === 'COMFORTING' ? 'COMFORTING' : 'IDLE');
           },
-          () => {
-            setMascotState('IDLE');
+          (err) => {
+            console.warn('[AI Screen] Speech playback note:', err);
+            setMascotState(response.emotion || 'IDLE');
+            setSpeechError('Audio tap required by browser. Tap replay.');
           }
         );
       } else {
-        // Voice muted
+        // Voice mode off
         setMascotState(response.emotion || 'IDLE');
       }
     } catch {
-      setActiveSpeaker('ai');
-      setActiveSpeechText("I'm right here with you 🌱. Take a gentle breath and let's take this one step at a time.");
+      setActiveResponseText("I'm right here with you 🌱. Take a gentle breath and let's take this one step at a time.");
       setMascotState('COMFORTING');
     }
   };
 
-  // Toggle Voice Listening (Speech Recognition)
+  // Toggle Microphone
   const handleToggleListening = () => {
+    speechService.unlockAudio();
+
     if (isListening) {
       speechService.stopListening();
       setIsListening(false);
@@ -171,13 +160,9 @@ export default function AICompanionScreen() {
       return;
     }
 
-    // Stop speaking if mascot was talking
     speechService.stopSpeaking();
-
     setIsListening(true);
     setMascotState('LISTENING');
-    setActiveSpeaker('ai');
-    setActiveSpeechText("I'm listening softly... speak whenever you're ready 🌱");
 
     const started = speechService.startListening({
       onStart: () => {
@@ -187,7 +172,7 @@ export default function AICompanionScreen() {
       onResult: (transcript: string) => {
         setIsListening(false);
         if (transcript.trim()) {
-          processInput(transcript);
+          processMessage(transcript);
         } else {
           setMascotState('IDLE');
         }
@@ -195,12 +180,10 @@ export default function AICompanionScreen() {
       onError: (errorMsg: string) => {
         setIsListening(false);
         if (errorMsg === 'MOBILE_EXPO_GO_VOICE') {
-          // On mobile Expo Go, open the voice companion sheet
           setMobileVoiceModalVisible(true);
           setMascotState('LISTENING');
         } else {
           setMascotState('IDLE');
-          setActiveSpeechText(`Mic note: ${errorMsg}`);
         }
       },
       onEnd: () => {
@@ -215,42 +198,58 @@ export default function AICompanionScreen() {
     }
   };
 
-  // Interrupt / Stop AI Speech
-  const handleInterruptSpeech = async () => {
+  // Replay speech audio
+  const handleReplaySpeech = async () => {
+    if (!activeResponseText) return;
+    speechService.unlockAudio();
+    setMascotState('SPEAKING');
+    setSpeechError(null);
+
+    await speechService.speak(
+      activeResponseText,
+      () => setMascotState('SPEAKING'),
+      () => setMascotState('IDLE'),
+      (err) => {
+        setMascotState('IDLE');
+        setSpeechError('Could not play audio. Tap again.');
+      }
+    );
+  };
+
+  // Stop / Pause audio
+  const handleStopSpeech = async () => {
     await speechService.stopSpeaking();
     setMascotState('IDLE');
   };
 
-  // New Chat action
+  // Restart / New Chat
   const handleNewChat = async () => {
+    speechService.unlockAudio();
     await speechService.stopSpeaking();
     setActiveThreadId(undefined);
-    setActiveSpeaker('ai');
-    setActiveSpeechText("Fresh reflection space 🌱 How are you feeling right now?");
-    setActiveSteps(null);
-    setShowSprintWidget(false);
-    setQuickReplies(["I'm feeling stressed", 'Help me focus', "Let's talk"]);
+    setRecentUserQuery(null);
+    setActiveResponseText(null);
+    setSpeechError(null);
     setMascotState('HAPPY');
-    setTimeout(() => setMascotState('IDLE'), 1800);
+    setTimeout(() => setMascotState('IDLE'), 2000);
   };
 
-  // Select past thread
+  // Select Thread
   const handleSelectThread = async (thread: ConversationThread) => {
+    speechService.unlockAudio();
     await speechService.stopSpeaking();
     setActiveThreadId(thread.id);
     const lastMsg = thread.messages[thread.messages.length - 1];
     if (lastMsg) {
-      setActiveSpeaker(lastMsg.sender);
-      setActiveSpeechText(lastMsg.text);
-      setActiveSteps(lastMsg.steps || null);
-      setShowSprintWidget(!!lastMsg.showSprintWidget);
-      if (lastMsg.sprintTopic) setSprintTopic(lastMsg.sprintTopic);
-      if (lastMsg.quickReplies) setQuickReplies(lastMsg.quickReplies);
+      setActiveResponseText(lastMsg.text);
       setMascotState(lastMsg.emotion || 'IDLE');
     }
   };
 
   const topInset = Math.max(insets.top, Platform.OS === 'android' ? 24 : 16);
+
+  // Mascot sizing dynamically scales to occupy focal center stage
+  const mascotDisplaySize = Math.min(270, Math.max(220, SCREEN_WIDTH * 0.62));
 
   return (
     <View style={styles.container}>
@@ -267,64 +266,61 @@ export default function AICompanionScreen() {
         style={styles.keyboardContainer}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
-        {/* Top Controls Bar */}
+        {/* Compact Header Bar */}
         <View style={[styles.topBar, { paddingTop: topInset }]}>
           <View style={styles.topBarContent}>
             {/* Left: Menu */}
             <TouchableOpacity
               style={styles.topButton}
-              onPress={() => setSidebarOpen(true)}
+              onPress={() => {
+                speechService.unlockAudio();
+                setSidebarOpen(true);
+              }}
               activeOpacity={0.7}
               accessibilityLabel="Open sidebar menu"
             >
-              <Menu size={22} color="#D2E3DB" strokeWidth={2} />
+              <Menu size={20} color="#D2E3DB" strokeWidth={2} />
             </TouchableOpacity>
 
-            {/* Center Title */}
-            <View style={styles.brandTitleGroup}>
-              <Text style={styles.brandTitleText}>BLOOM AI</Text>
-              <View style={styles.brandSubRow}>
-                <View
-                  style={[
-                    styles.statusIndicatorDot,
-                    {
-                      backgroundColor:
-                        mascotState === 'SPEAKING'
-                          ? '#64D2B4'
-                          : mascotState === 'LISTENING'
-                          ? '#78B29C'
-                          : '#B8EEDA',
-                    },
-                  ]}
-                />
-                <Text style={styles.brandSubText}>
-                  {mascotState === 'SPEAKING'
-                    ? 'Speaking softly'
-                    : mascotState === 'LISTENING'
-                    ? 'Listening...'
-                    : mascotState === 'THINKING'
-                    ? 'Reflecting...'
-                    : 'Serene companion'}
-                </Text>
-              </View>
+            {/* Center: Branding */}
+            <View style={styles.brandGroup}>
+              <Text style={styles.brandTitle}>BLOOM AI</Text>
+              <Text style={styles.brandSub}>Mindful Companion</Text>
             </View>
 
-            {/* Right: Audio Toggle & Reset */}
+            {/* Right: Speaker Audio Toggle & Reset */}
             <View style={styles.topRightControls}>
               <TouchableOpacity
-                style={[styles.topButton, isVoiceMode && styles.topButtonActive]}
+                style={[
+                  styles.topButton,
+                  isVoiceMode && styles.topButtonActive,
+                  mascotState === 'SPEAKING' && styles.topButtonSpeaking,
+                ]}
                 onPress={() => {
-                  const nextState = !isVoiceMode;
-                  setIsVoiceMode(nextState);
-                  if (!nextState) speechService.stopSpeaking();
+                  speechService.unlockAudio();
+                  if (mascotState === 'SPEAKING') {
+                    handleStopSpeech();
+                  } else {
+                    const next = !isVoiceMode;
+                    setIsVoiceMode(next);
+                    if (!next) speechService.stopSpeaking();
+                  }
                 }}
                 activeOpacity={0.7}
-                accessibilityLabel={isVoiceMode ? 'Mute voice' : 'Enable voice'}
+                accessibilityLabel={
+                  mascotState === 'SPEAKING'
+                    ? 'Stop speaking'
+                    : isVoiceMode
+                    ? 'Mute speech'
+                    : 'Enable speech'
+                }
               >
-                {isVoiceMode ? (
-                  <Volume2 size={19} color="#B8EEDA" strokeWidth={2} />
+                {mascotState === 'SPEAKING' ? (
+                  <Square size={14} color="#B8EEDA" fill="#B8EEDA" />
+                ) : isVoiceMode ? (
+                  <Volume2 size={18} color="#B8EEDA" strokeWidth={2.2} />
                 ) : (
-                  <VolumeX size={19} color="#7D8E86" strokeWidth={2} />
+                  <VolumeX size={18} color="#6C7A72" strokeWidth={2} />
                 )}
               </TouchableOpacity>
 
@@ -332,155 +328,147 @@ export default function AICompanionScreen() {
                 style={styles.topButton}
                 onPress={handleNewChat}
                 activeOpacity={0.7}
-                accessibilityLabel="Restart conversation"
+                accessibilityLabel="Restart companion"
               >
-                <RotateCcw size={18} color="#D2E3DB" strokeWidth={2} />
+                <RotateCcw size={17} color="#D2E3DB" strokeWidth={2} />
               </TouchableOpacity>
             </View>
           </View>
         </View>
 
-        {/* Centerpiece Stage: Animated Interactive Mascot */}
-        <ScrollView
-          style={styles.centerStageScroll}
-          contentContainerStyle={styles.centerStageContent}
-          showsVerticalScrollIndicator={false}
-          keyboardShouldPersistTaps="handled"
-        >
-          {/* Animated Mascot */}
-          <View style={styles.mascotContainer}>
+        {/* Center Stage: Animated Interactive Mascot */}
+        <View style={styles.centerStage}>
+          {/* Prominent Center Mascot */}
+          <View style={styles.mascotWrapper}>
             <AnimatedMascot
               state={mascotState}
-              size={Math.min(200, SCREEN_WIDTH * 0.48)}
+              size={mascotDisplaySize}
               onTap={() => {
+                speechService.unlockAudio();
                 setMascotState('HAPPY');
                 setTimeout(() => setMascotState('IDLE'), 2800);
               }}
             />
           </View>
 
-          {/* Dynamic Dialogue Glass Card */}
-          <View style={styles.dialogueGlassCard}>
-            <View style={styles.dialogueHeader}>
-              <View style={styles.dialogueSpeakerBadge}>
-                <Sparkles size={13} color="#B8EEDA" strokeWidth={2} />
-                <Text style={styles.dialogueSpeakerText}>
-                  {activeSpeaker === 'ai' ? 'Bloom' : 'You'}
-                </Text>
+          {/* Compact Response Area (Only appears when there is active speech or thoughts) */}
+          {activeResponseText ? (
+            <View style={styles.compactResponseCard}>
+              <View style={styles.compactResponseHeader}>
+                <View style={styles.responseSpeakerTag}>
+                  <Sparkles size={12} color="#B8EEDA" strokeWidth={2} />
+                  <Text style={styles.responseSpeakerText}>Bloom</Text>
+                </View>
+
+                {/* Audio controls for response */}
+                <View style={styles.responseAudioControls}>
+                  {mascotState === 'SPEAKING' ? (
+                    <TouchableOpacity
+                      style={styles.responseActionBtn}
+                      onPress={handleStopSpeech}
+                      activeOpacity={0.7}
+                    >
+                      <Square size={11} color="#FFDAD6" fill="#FFDAD6" />
+                      <Text style={styles.responseActionBtnText}>Pause</Text>
+                    </TouchableOpacity>
+                  ) : (
+                    <TouchableOpacity
+                      style={styles.responseActionBtn}
+                      onPress={handleReplaySpeech}
+                      activeOpacity={0.7}
+                    >
+                      <Play size={11} color="#B8EEDA" fill="#B8EEDA" />
+                      <Text style={styles.responseActionBtnText}>Replay Voice</Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
               </View>
 
-              {/* Interrupt / Stop Button when Speaking */}
-              {mascotState === 'SPEAKING' && (
-                <TouchableOpacity
-                  style={styles.interruptButton}
-                  onPress={handleInterruptSpeech}
-                  activeOpacity={0.8}
-                >
-                  <Square size={10} color="#FFDAD6" fill="#FFDAD6" />
-                  <Text style={styles.interruptText}>Pause Voice</Text>
-                </TouchableOpacity>
+              {/* Response Text */}
+              <ScrollView
+                style={styles.responseScroll}
+                contentContainerStyle={styles.responseScrollContent}
+                showsVerticalScrollIndicator={true}
+              >
+                {recentUserQuery && (
+                  <Text style={styles.userQueryPreview}>
+                    You: "{recentUserQuery}"
+                  </Text>
+                )}
+                <Text style={styles.responseBodyText}>{activeResponseText}</Text>
+              </ScrollView>
+
+              {/* Error note if audio was blocked */}
+              {speechError && (
+                <View style={styles.speechErrorRow}>
+                  <AlertCircle size={12} color="#F472B6" />
+                  <Text style={styles.speechErrorText}>{speechError}</Text>
+                </View>
               )}
             </View>
+          ) : (
+            /* Subtitle prompt when idle */
+            <View style={styles.idleHintContainer}>
+              <Text style={styles.idleHintTitle}>Hey, I'm Bloom 🌱</Text>
+              <Text style={styles.idleHintSubtitle}>
+                Tap me, speak into the mic, or type a thought below.
+              </Text>
+            </View>
+          )}
+        </View>
 
-            {/* Speech Prose */}
-            <Text style={styles.dialogueBodyText}>{activeSpeechText}</Text>
-
-            {/* Structured Steps if present */}
-            {activeSteps && activeSteps.length > 0 && (
-              <View style={styles.stepsContainer}>
-                {activeSteps.map((st) => (
-                  <View key={st.stepNumber} style={styles.stepRow}>
-                    <View style={styles.stepBadge}>
-                      <Text style={styles.stepBadgeText}>{st.stepNumber}</Text>
-                    </View>
-                    <Text style={styles.stepText}>
-                      <Text style={styles.stepTitleBold}>{st.title} </Text>
-                      {st.detail}
-                    </Text>
-                  </View>
-                ))}
-              </View>
-            )}
-
-            {/* Interactive Focus Sprint Card if present */}
-            {showSprintWidget && (
-              <View style={styles.sprintCardWrapper}>
-                <StudySprintCard topic={sprintTopic} initialMinutes={20} />
-              </View>
-            )}
-
-            {/* Quick Action Suggestion Pills */}
-            {quickReplies && quickReplies.length > 0 && (
-              <View style={styles.quickRepliesRow}>
-                {quickReplies.map((reply, idx) => (
-                  <TouchableOpacity
-                    key={idx}
-                    style={styles.quickReplyPill}
-                    onPress={() => processInput(reply)}
-                    activeOpacity={0.7}
-                  >
-                    <Leaf size={11} color="#B8EEDA" strokeWidth={2} />
-                    <Text style={styles.quickReplyPillText}>{reply}</Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-            )}
-          </View>
-
-          {/* Spacer */}
-          <View style={{ height: 110 }} />
-        </ScrollView>
-
-        {/* Bottom Interactive Dock */}
+        {/* Compact Bottom Message Composer */}
         <View
           style={[
-            styles.bottomDock,
-            { paddingBottom: Math.max(insets.bottom, 12) },
+            styles.composerBar,
+            { paddingBottom: Math.max(insets.bottom, 10) },
           ]}
         >
-          <View style={styles.dockInner}>
-            {/* Main Glowing Microphone Button */}
+          <View style={styles.composerInner}>
+            {/* Microphone Button */}
             <TouchableOpacity
               style={[
-                styles.micLargeButton,
-                isListening && styles.micLargeButtonActive,
+                styles.micBtn,
+                isListening && styles.micBtnActive,
               ]}
               onPress={handleToggleListening}
               activeOpacity={0.85}
-              accessibilityLabel={isListening ? 'Stop listening' : 'Start voice chat'}
+              accessibilityLabel={isListening ? 'Stop recording' : 'Voice check-in'}
             >
               {isListening ? (
-                <MicOff size={22} color="#FFFFFF" strokeWidth={2.4} />
+                <MicOff size={20} color="#FFFFFF" strokeWidth={2.4} />
               ) : (
-                <Mic size={22} color="#FFFFFF" strokeWidth={2.4} />
+                <Mic size={20} color="#FFFFFF" strokeWidth={2.4} />
               )}
             </TouchableOpacity>
 
-            {/* Compact Text Composer Input */}
-            <View style={styles.textInputHousing}>
+            {/* Text Input Housing */}
+            <View style={styles.inputHousing}>
               <TextInput
                 style={styles.textInput}
-                placeholder="Ask or whisper to Bloom..."
+                placeholder="Talk or whisper to Bloom..."
                 placeholderTextColor="rgba(210, 227, 219, 0.45)"
                 value={inputText}
                 onChangeText={setInputText}
-                onSubmitEditing={() => processInput(inputText)}
+                onSubmitEditing={() => processMessage(inputText)}
                 returnKeyType="send"
                 enablesReturnKeyAutomatically={true}
               />
+
               <TouchableOpacity
                 style={[
-                  styles.sendButton,
-                  inputText.trim().length > 0 && styles.sendButtonActive,
+                  styles.sendBtn,
+                  inputText.trim().length > 0 && styles.sendBtnActive,
                 ]}
-                onPress={() => processInput(inputText)}
+                onPress={() => processMessage(inputText)}
                 disabled={inputText.trim().length === 0}
                 activeOpacity={0.8}
+                accessibilityLabel="Send message"
               >
                 <Send
                   size={15}
-                  color={inputText.trim().length > 0 ? '#FFFFFF' : '#52635B'}
-                  strokeWidth={2.2}
+                  color={inputText.trim().length > 0 ? '#FFFFFF' : '#4E5F57'}
+                  strokeWidth={2.4}
                 />
               </TouchableOpacity>
             </View>
@@ -517,7 +505,7 @@ export default function AICompanionScreen() {
             </View>
 
             <Text style={styles.modalSubtitle}>
-              Choose a voice thought or speak aloud — Bloom will answer with live spoken voice:
+              Select a thought to speak with Bloom — response will be spoken aloud:
             </Text>
 
             {/* Waveform indicator */}
@@ -531,30 +519,30 @@ export default function AICompanionScreen() {
               <Animated.View
                 style={[
                   styles.waveformBar,
-                  { height: 48, transform: [{ scaleY: voiceWaveAnim }] },
+                  { height: 50, transform: [{ scaleY: voiceWaveAnim }] },
                 ]}
               />
               <Animated.View
                 style={[
                   styles.waveformBar,
-                  { height: 24, transform: [{ scaleY: voiceWaveAnim }] },
+                  { height: 26, transform: [{ scaleY: voiceWaveAnim }] },
                 ]}
               />
               <Animated.View
                 style={[
                   styles.waveformBar,
-                  { height: 42, transform: [{ scaleY: voiceWaveAnim }] },
+                  { height: 44, transform: [{ scaleY: voiceWaveAnim }] },
                 ]}
               />
               <Animated.View
                 style={[
                   styles.waveformBar,
-                  { height: 28, transform: [{ scaleY: voiceWaveAnim }] },
+                  { height: 30, transform: [{ scaleY: voiceWaveAnim }] },
                 ]}
               />
             </View>
 
-            {/* Quick Sample Voice Prompts */}
+            {/* Quick Prompts */}
             <View style={styles.samplePromptsList}>
               {SAMPLE_VOICE_PROMPTS.map((p, i) => (
                 <TouchableOpacity
@@ -562,7 +550,7 @@ export default function AICompanionScreen() {
                   style={styles.samplePromptCard}
                   onPress={() => {
                     setMobileVoiceModalVisible(false);
-                    processInput(p);
+                    processMessage(p);
                   }}
                   activeOpacity={0.7}
                 >
@@ -587,13 +575,13 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   topBar: {
-    backgroundColor: 'rgba(11, 14, 27, 0.92)',
+    backgroundColor: 'rgba(11, 14, 27, 0.94)',
     borderBottomWidth: 1,
     borderBottomColor: 'rgba(91, 142, 125, 0.12)',
     zIndex: 10,
   },
   topBarContent: {
-    height: 56,
+    height: 52,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
@@ -603,204 +591,176 @@ const styles = StyleSheet.create({
     alignSelf: 'center',
   },
   topButton: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    backgroundColor: 'rgba(25, 33, 49, 0.7)',
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: 'rgba(25, 33, 49, 0.75)',
     justifyContent: 'center',
     alignItems: 'center',
   },
   topButtonActive: {
-    backgroundColor: 'rgba(50, 101, 86, 0.65)',
+    backgroundColor: 'rgba(50, 101, 86, 0.7)',
     borderWidth: 1,
     borderColor: '#64D2B4',
   },
-  brandTitleGroup: {
+  topButtonSpeaking: {
+    backgroundColor: 'rgba(186, 26, 26, 0.4)',
+    borderColor: '#FFDAD6',
+    borderWidth: 1,
+  },
+  brandGroup: {
     alignItems: 'center',
   },
-  brandTitleText: {
+  brandTitle: {
     ...Typography.body,
     fontWeight: '800',
-    fontSize: 16,
+    fontSize: 15,
     color: '#F5FFF9',
     letterSpacing: 0.8,
   },
-  brandSubRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5,
-    marginTop: 2,
-  },
-  statusIndicatorDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-  },
-  brandSubText: {
+  brandSub: {
     ...Typography.caption,
-    fontSize: 11,
+    fontSize: 10,
     color: '#9CD1BE',
     fontWeight: '500',
+    marginTop: 1,
   },
   topRightControls: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
   },
-  centerStageScroll: {
+  centerStage: {
     flex: 1,
-  },
-  centerStageContent: {
+    alignItems: 'center',
+    justifyContent: 'center',
     paddingHorizontal: 16,
-    paddingTop: 16,
     maxWidth: 720,
     width: '100%',
     alignSelf: 'center',
-    alignItems: 'center',
   },
-  mascotContainer: {
-    marginVertical: 12,
+  mascotWrapper: {
     alignItems: 'center',
     justifyContent: 'center',
+    marginVertical: 8,
   },
-  dialogueGlassCard: {
+  idleHintContainer: {
+    alignItems: 'center',
+    marginTop: 14,
+    paddingHorizontal: 20,
+  },
+  idleHintTitle: {
+    ...Typography.h3,
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#F5FFF9',
+    letterSpacing: -0.2,
+    marginBottom: 4,
+  },
+  idleHintSubtitle: {
+    ...Typography.caption,
+    fontSize: 13,
+    color: '#9CD1BE',
+    textAlign: 'center',
+    maxWidth: 300,
+    lineHeight: 18,
+  },
+  compactResponseCard: {
     width: '100%',
-    backgroundColor: 'rgba(18, 25, 40, 0.82)',
-    borderRadius: 22,
-    padding: 18,
+    maxHeight: 180,
+    backgroundColor: 'rgba(18, 25, 40, 0.88)',
+    borderRadius: 18,
+    padding: 14,
     borderWidth: 1,
     borderColor: 'rgba(120, 178, 156, 0.22)',
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.35,
-    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 12,
     elevation: 6,
-    marginTop: 10,
+    marginTop: 12,
   },
-  dialogueHeader: {
+  compactResponseHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 8,
+    marginBottom: 6,
   },
-  dialogueSpeakerBadge: {
+  responseSpeakerTag: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
+    gap: 5,
     backgroundColor: 'rgba(50, 101, 86, 0.4)',
-    paddingHorizontal: 10,
-    paddingVertical: 3,
+    paddingHorizontal: 9,
+    paddingVertical: 2.5,
     borderRadius: 9999,
   },
-  dialogueSpeakerText: {
+  responseSpeakerText: {
     ...Typography.caption,
     fontSize: 11,
     fontWeight: '700',
     color: '#B8EEDA',
   },
-  interruptButton: {
+  responseAudioControls: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    backgroundColor: 'rgba(186, 26, 26, 0.3)',
+  },
+  responseActionBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: 'rgba(25, 36, 54, 0.8)',
     borderWidth: 1,
-    borderColor: 'rgba(255, 218, 214, 0.4)',
-    paddingHorizontal: 10,
+    borderColor: 'rgba(120, 178, 156, 0.3)',
+    paddingHorizontal: 9,
     paddingVertical: 3,
     borderRadius: 9999,
   },
-  interruptText: {
+  responseActionBtnText: {
     ...Typography.caption,
     fontSize: 10,
-    color: '#FFDAD6',
-    fontWeight: '700',
-  },
-  dialogueBodyText: {
-    ...Typography.body,
-    fontSize: 15,
-    lineHeight: 24,
-    color: '#E3F5EA',
-  },
-  stepsContainer: {
-    backgroundColor: 'rgba(11, 16, 28, 0.65)',
-    padding: 12,
-    borderRadius: 14,
-    gap: 8,
-    marginVertical: 12,
-    borderWidth: 1,
-    borderColor: 'rgba(91, 142, 125, 0.15)',
-  },
-  stepRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 8,
-  },
-  stepBadge: {
-    width: 20,
-    height: 20,
-    borderRadius: 10,
-    backgroundColor: '#326556',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginTop: 2,
-  },
-  stepBadgeText: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: '#FFFFFF',
-  },
-  stepText: {
-    ...Typography.bodySmall,
-    fontSize: 13,
-    color: '#D2E3DB',
-    flex: 1,
-    lineHeight: 18,
-  },
-  stepTitleBold: {
-    fontWeight: '700',
-    color: '#B8EEDA',
-  },
-  sprintCardWrapper: {
-    marginTop: 10,
-  },
-  quickRepliesRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-    marginTop: 14,
-    paddingTop: 10,
-    borderTopWidth: 1,
-    borderTopColor: 'rgba(91, 142, 125, 0.12)',
-  },
-  quickReplyPill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    backgroundColor: 'rgba(30, 42, 60, 0.85)',
-    paddingHorizontal: 12,
-    paddingVertical: 7,
-    borderRadius: 9999,
-    borderWidth: 1,
-    borderColor: 'rgba(120, 178, 156, 0.25)',
-  },
-  quickReplyPillText: {
-    ...Typography.caption,
-    fontSize: 12,
     color: '#D2E3DB',
     fontWeight: '600',
   },
-  bottomDock: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
+  responseScroll: {
+    maxHeight: 120,
+  },
+  responseScrollContent: {
+    paddingVertical: 2,
+  },
+  userQueryPreview: {
+    ...Typography.caption,
+    fontSize: 11,
+    color: '#7B8E86',
+    fontStyle: 'italic',
+    marginBottom: 4,
+  },
+  responseBodyText: {
+    ...Typography.bodySmall,
+    fontSize: 13,
+    lineHeight: 20,
+    color: '#E3F5EA',
+  },
+  speechErrorRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    marginTop: 6,
+  },
+  speechErrorText: {
+    ...Typography.caption,
+    fontSize: 11,
+    color: '#F472B6',
+  },
+  composerBar: {
     backgroundColor: 'rgba(11, 14, 27, 0.95)',
     borderTopWidth: 1,
     borderTopColor: 'rgba(91, 142, 125, 0.12)',
     paddingHorizontal: 16,
-    paddingTop: 10,
+    paddingTop: 8,
   },
-  dockInner: {
+  composerInner: {
     maxWidth: 720,
     width: '100%',
     alignSelf: 'center',
@@ -808,51 +768,51 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 10,
   },
-  micLargeButton: {
-    width: 46,
-    height: 46,
-    borderRadius: 23,
+  micBtn: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     backgroundColor: '#326556',
     justifyContent: 'center',
     alignItems: 'center',
     shadowColor: '#64D2B4',
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 4,
+    shadowOpacity: 0.25,
+    shadowRadius: 6,
+    elevation: 3,
   },
-  micLargeButtonActive: {
+  micBtnActive: {
     backgroundColor: '#BA1A1A',
     shadowColor: '#FFDAD6',
   },
-  textInputHousing: {
+  inputHousing: {
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(21, 29, 46, 0.9)',
+    backgroundColor: 'rgba(21, 29, 46, 0.92)',
     borderRadius: 9999,
     paddingHorizontal: 12,
-    paddingVertical: 4,
+    paddingVertical: 3,
     borderWidth: 1,
-    borderColor: 'rgba(91, 142, 125, 0.2)',
+    borderColor: 'rgba(91, 142, 125, 0.22)',
   },
   textInput: {
     flex: 1,
     ...Typography.body,
-    fontSize: 14,
+    fontSize: 13,
     color: '#F5FFF9',
-    paddingVertical: 8,
+    paddingVertical: 7,
     paddingHorizontal: 6,
   },
-  sendButton: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
+  sendBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
     backgroundColor: 'rgba(35, 47, 70, 0.7)',
     justifyContent: 'center',
     alignItems: 'center',
   },
-  sendButtonActive: {
+  sendBtnActive: {
     backgroundColor: '#326556',
   },
   modalBackdrop: {

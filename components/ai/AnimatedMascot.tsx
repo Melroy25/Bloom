@@ -27,8 +27,9 @@ const TAP_MESSAGES = [
   "Small steps make big journeys 🌸",
 ];
 
-export function AnimatedMascot({ state = 'IDLE', onTap, size = 180 }: AnimatedMascotProps) {
+export function AnimatedMascot({ state = 'IDLE', onTap, size = 240 }: AnimatedMascotProps) {
   const [tapBubbleText, setTapBubbleText] = useState<string | null>(null);
+  const [speakingFrame, setSpeakingFrame] = useState<boolean>(false);
   const isTapAnimating = useRef(false);
 
   // Animated values
@@ -43,10 +44,33 @@ export function AnimatedMascot({ state = 'IDLE', onTap, size = 180 }: AnimatedMa
   const bubbleOpacity = useRef(new Animated.Value(0)).current;
   const bubbleTranslate = useRef(new Animated.Value(10)).current;
 
-  // Track active state animation loops
+  // Track active animation loops
   const activeLoopRef = useRef<Animated.CompositeAnimation | null>(null);
+  const speakingIntervalRef = useRef<any>(null);
 
-  // Sparkle twinkle loop
+  // Alternating speaking frame toggle when state === 'SPEAKING'
+  useEffect(() => {
+    if (state === 'SPEAKING') {
+      speakingIntervalRef.current = setInterval(() => {
+        setSpeakingFrame((prev) => !prev);
+      }, 240);
+    } else {
+      if (speakingIntervalRef.current) {
+        clearInterval(speakingIntervalRef.current);
+        speakingIntervalRef.current = null;
+      }
+      setSpeakingFrame(false);
+    }
+
+    return () => {
+      if (speakingIntervalRef.current) {
+        clearInterval(speakingIntervalRef.current);
+        speakingIntervalRef.current = null;
+      }
+    };
+  }, [state]);
+
+  // Ambient Twinkling Sparkles Loop
   useEffect(() => {
     const sparkleLoop = Animated.loop(
       Animated.sequence([
@@ -56,7 +80,7 @@ export function AnimatedMascot({ state = 'IDLE', onTap, size = 180 }: AnimatedMa
           useNativeDriver: true,
         }),
         Animated.timing(sparkleOpacity, {
-          toValue: 0.2,
+          toValue: 0.25,
           duration: 1400,
           useNativeDriver: true,
         }),
@@ -78,47 +102,44 @@ export function AnimatedMascot({ state = 'IDLE', onTap, size = 180 }: AnimatedMa
 
     if (state === 'IDLE') {
       const loop = Animated.parallel([
-        // Floating up and down
         Animated.loop(
           Animated.sequence([
             Animated.timing(floatAnim, {
-              toValue: -12,
-              duration: 2200,
+              toValue: -14,
+              duration: 2400,
               useNativeDriver: true,
             }),
             Animated.timing(floatAnim, {
               toValue: 0,
-              duration: 2200,
+              duration: 2400,
               useNativeDriver: true,
             }),
           ])
         ),
-        // Soft breathing scale
         Animated.loop(
           Animated.sequence([
             Animated.timing(breathAnim, {
-              toValue: 1.04,
-              duration: 2200,
+              toValue: 1.05,
+              duration: 2400,
               useNativeDriver: true,
             }),
             Animated.timing(breathAnim, {
-              toValue: 0.98,
-              duration: 2200,
+              toValue: 0.97,
+              duration: 2400,
               useNativeDriver: true,
             }),
           ])
         ),
-        // Ambient aura pulse
         Animated.loop(
           Animated.sequence([
             Animated.timing(auraScaleAnim, {
-              toValue: 1.15,
-              duration: 2200,
+              toValue: 1.18,
+              duration: 2400,
               useNativeDriver: true,
             }),
             Animated.timing(auraScaleAnim, {
-              toValue: 0.95,
-              duration: 2200,
+              toValue: 0.94,
+              duration: 2400,
               useNativeDriver: true,
             }),
           ])
@@ -131,13 +152,13 @@ export function AnimatedMascot({ state = 'IDLE', onTap, size = 180 }: AnimatedMa
         Animated.loop(
           Animated.sequence([
             Animated.timing(floatAnim, {
-              toValue: -18,
-              duration: 600,
+              toValue: -22,
+              duration: 550,
               useNativeDriver: true,
             }),
             Animated.timing(floatAnim, {
               toValue: 0,
-              duration: 600,
+              duration: 550,
               useNativeDriver: true,
             }),
           ])
@@ -145,18 +166,13 @@ export function AnimatedMascot({ state = 'IDLE', onTap, size = 180 }: AnimatedMa
         Animated.loop(
           Animated.sequence([
             Animated.timing(tiltAnim, {
-              toValue: 0.05,
-              duration: 300,
+              toValue: 0.06,
+              duration: 275,
               useNativeDriver: true,
             }),
             Animated.timing(tiltAnim, {
-              toValue: -0.05,
-              duration: 300,
-              useNativeDriver: true,
-            }),
-            Animated.timing(tiltAnim, {
-              toValue: 0,
-              duration: 300,
+              toValue: -0.06,
+              duration: 275,
               useNativeDriver: true,
             }),
           ])
@@ -165,18 +181,17 @@ export function AnimatedMascot({ state = 'IDLE', onTap, size = 180 }: AnimatedMa
       activeLoopRef.current = loop;
       loop.start();
     } else if (state === 'LISTENING') {
-      // Gentle attentive hover + expanding soundwave rings
       const loop = Animated.parallel([
         Animated.loop(
           Animated.sequence([
             Animated.timing(floatAnim, {
-              toValue: -6,
-              duration: 1500,
+              toValue: -8,
+              duration: 1600,
               useNativeDriver: true,
             }),
             Animated.timing(floatAnim, {
               toValue: 0,
-              duration: 1500,
+              duration: 1600,
               useNativeDriver: true,
             }),
           ])
@@ -185,7 +200,7 @@ export function AnimatedMascot({ state = 'IDLE', onTap, size = 180 }: AnimatedMa
           Animated.sequence([
             Animated.timing(ring1Anim, {
               toValue: 1,
-              duration: 1400,
+              duration: 1500,
               useNativeDriver: true,
             }),
             Animated.timing(ring1Anim, {
@@ -197,10 +212,10 @@ export function AnimatedMascot({ state = 'IDLE', onTap, size = 180 }: AnimatedMa
         ),
         Animated.loop(
           Animated.sequence([
-            Animated.delay(700),
+            Animated.delay(750),
             Animated.timing(ring2Anim, {
               toValue: 1,
-              duration: 1400,
+              duration: 1500,
               useNativeDriver: true,
             }),
             Animated.timing(ring2Anim, {
@@ -214,18 +229,17 @@ export function AnimatedMascot({ state = 'IDLE', onTap, size = 180 }: AnimatedMa
       activeLoopRef.current = loop;
       loop.start();
     } else if (state === 'THINKING') {
-      // Gentle rhythmic orbital drift with glowing nebula
       const loop = Animated.parallel([
         Animated.loop(
           Animated.sequence([
             Animated.timing(floatAnim, {
-              toValue: -8,
-              duration: 1800,
+              toValue: -10,
+              duration: 1900,
               useNativeDriver: true,
             }),
             Animated.timing(floatAnim, {
               toValue: 0,
-              duration: 1800,
+              duration: 1900,
               useNativeDriver: true,
             }),
           ])
@@ -233,13 +247,13 @@ export function AnimatedMascot({ state = 'IDLE', onTap, size = 180 }: AnimatedMa
         Animated.loop(
           Animated.sequence([
             Animated.timing(tiltAnim, {
-              toValue: -0.04,
-              duration: 1200,
+              toValue: -0.05,
+              duration: 1300,
               useNativeDriver: true,
             }),
             Animated.timing(tiltAnim, {
-              toValue: 0.04,
-              duration: 1200,
+              toValue: 0.05,
+              duration: 1300,
               useNativeDriver: true,
             }),
           ])
@@ -248,18 +262,17 @@ export function AnimatedMascot({ state = 'IDLE', onTap, size = 180 }: AnimatedMa
       activeLoopRef.current = loop;
       loop.start();
     } else if (state === 'SPEAKING') {
-      // Syllable-paced bounce and speaking rhythm
       const loop = Animated.parallel([
         Animated.loop(
           Animated.sequence([
             Animated.timing(bounceAnim, {
-              toValue: 1.07,
-              duration: 350,
+              toValue: 1.08,
+              duration: 320,
               useNativeDriver: true,
             }),
             Animated.timing(bounceAnim, {
-              toValue: 0.96,
-              duration: 350,
+              toValue: 0.95,
+              duration: 320,
               useNativeDriver: true,
             }),
           ])
@@ -267,13 +280,13 @@ export function AnimatedMascot({ state = 'IDLE', onTap, size = 180 }: AnimatedMa
         Animated.loop(
           Animated.sequence([
             Animated.timing(floatAnim, {
-              toValue: -10,
-              duration: 700,
+              toValue: -12,
+              duration: 640,
               useNativeDriver: true,
             }),
             Animated.timing(floatAnim, {
               toValue: 0,
-              duration: 700,
+              duration: 640,
               useNativeDriver: true,
             }),
           ])
@@ -282,19 +295,16 @@ export function AnimatedMascot({ state = 'IDLE', onTap, size = 180 }: AnimatedMa
       activeLoopRef.current = loop;
       loop.start();
     } else if (state === 'COMFORTING') {
-      // Deep 4-second box-breathing wave
       const loop = Animated.parallel([
         Animated.loop(
           Animated.sequence([
-            // Inhale expansion (4s)
             Animated.timing(breathAnim, {
-              toValue: 1.1,
+              toValue: 1.12,
               duration: 4000,
               useNativeDriver: true,
             }),
-            // Exhale return (4s)
             Animated.timing(breathAnim, {
-              toValue: 0.95,
+              toValue: 0.94,
               duration: 4000,
               useNativeDriver: true,
             }),
@@ -303,7 +313,7 @@ export function AnimatedMascot({ state = 'IDLE', onTap, size = 180 }: AnimatedMa
         Animated.loop(
           Animated.sequence([
             Animated.timing(floatAnim, {
-              toValue: -14,
+              toValue: -16,
               duration: 4000,
               useNativeDriver: true,
             }),
@@ -318,10 +328,9 @@ export function AnimatedMascot({ state = 'IDLE', onTap, size = 180 }: AnimatedMa
       activeLoopRef.current = loop;
       loop.start();
     } else if (state === 'ERROR') {
-      // Gentle wobble
       Animated.sequence([
-        Animated.timing(tiltAnim, { toValue: -0.08, duration: 80, useNativeDriver: true }),
-        Animated.timing(tiltAnim, { toValue: 0.08, duration: 80, useNativeDriver: true }),
+        Animated.timing(tiltAnim, { toValue: -0.09, duration: 80, useNativeDriver: true }),
+        Animated.timing(tiltAnim, { toValue: 0.09, duration: 80, useNativeDriver: true }),
         Animated.timing(tiltAnim, { toValue: -0.06, duration: 80, useNativeDriver: true }),
         Animated.timing(tiltAnim, { toValue: 0.06, duration: 80, useNativeDriver: true }),
         Animated.timing(tiltAnim, { toValue: 0, duration: 80, useNativeDriver: true }),
@@ -340,14 +349,12 @@ export function AnimatedMascot({ state = 'IDLE', onTap, size = 180 }: AnimatedMa
     if (isTapAnimating.current) return;
     isTapAnimating.current = true;
 
-    // Pick random friendly message
     const msg = TAP_MESSAGES[Math.floor(Math.random() * TAP_MESSAGES.length)];
     setTapBubbleText(msg);
 
-    // Spring bounce animation
     Animated.sequence([
       Animated.spring(bounceAnim, {
-        toValue: 1.18,
+        toValue: 1.2,
         friction: 3,
         tension: 180,
         useNativeDriver: true,
@@ -360,7 +367,6 @@ export function AnimatedMascot({ state = 'IDLE', onTap, size = 180 }: AnimatedMa
       }),
     ]).start();
 
-    // Show speech bubble
     Animated.parallel([
       Animated.timing(bubbleOpacity, {
         toValue: 1,
@@ -376,7 +382,6 @@ export function AnimatedMascot({ state = 'IDLE', onTap, size = 180 }: AnimatedMa
 
     onTap?.();
 
-    // Hide bubble after 2.8s
     setTimeout(() => {
       Animated.parallel([
         Animated.timing(bubbleOpacity, {
@@ -396,19 +401,19 @@ export function AnimatedMascot({ state = 'IDLE', onTap, size = 180 }: AnimatedMa
     }, 2800);
   };
 
-  // State colors and badges
+  // State info
   const getStateInfo = () => {
     switch (state) {
       case 'HAPPY':
         return { label: 'Cheerful', color: '#B8EEDA', icon: Heart };
       case 'LISTENING':
-        return { label: "I'm listening...", color: '#64D2B4', icon: Mic };
+        return { label: 'Listening...', color: '#64D2B4', icon: Mic };
       case 'THINKING':
         return { label: 'Reflecting...', color: '#9CD1BE', icon: Sparkles };
       case 'SPEAKING':
         return { label: 'Speaking', color: '#78B29C', icon: Volume2 };
       case 'COMFORTING':
-        return { label: 'Breathing with you', color: '#B8EEDA', icon: Heart };
+        return { label: 'Breathing gently', color: '#B8EEDA', icon: Heart };
       case 'ERROR':
         return { label: 'Gentle pause', color: '#FFDAD6', icon: AlertCircle };
       default:
@@ -417,10 +422,20 @@ export function AnimatedMascot({ state = 'IDLE', onTap, size = 180 }: AnimatedMa
   };
 
   const stateInfo = getStateInfo();
-  const StateIcon = stateInfo.icon;
+
+  // Choose the visual image frame based on state
+  const getMascotFrame = () => {
+    if (state === 'SPEAKING' && speakingFrame) {
+      return require('../../assets/bloom-mascot-speaking.png');
+    }
+    if (state === 'HAPPY') {
+      return require('../../assets/bloom-mascot-happy.png');
+    }
+    return require('../../assets/bloom-cloud-mascot-hd.png');
+  };
 
   return (
-    <View style={[styles.container, { width: size * 1.6, height: size * 1.6 }]}>
+    <View style={[styles.container, { width: size * 1.5, height: size * 1.5 }]}>
       {/* Floating Speech Bubble when tapped */}
       {tapBubbleText && (
         <Animated.View
@@ -449,13 +464,13 @@ export function AnimatedMascot({ state = 'IDLE', onTap, size = 180 }: AnimatedMa
                 borderRadius: (size * 1.35) / 2,
                 opacity: ring1Anim.interpolate({
                   inputRange: [0, 0.5, 1],
-                  outputRange: [0.6, 0.3, 0],
+                  outputRange: [0.65, 0.35, 0],
                 }),
                 transform: [
                   {
                     scale: ring1Anim.interpolate({
                       inputRange: [0, 1],
-                      outputRange: [0.85, 1.35],
+                      outputRange: [0.85, 1.4],
                     }),
                   },
                 ],
@@ -471,13 +486,13 @@ export function AnimatedMascot({ state = 'IDLE', onTap, size = 180 }: AnimatedMa
                 borderRadius: (size * 1.35) / 2,
                 opacity: ring2Anim.interpolate({
                   inputRange: [0, 0.5, 1],
-                  outputRange: [0.6, 0.3, 0],
+                  outputRange: [0.65, 0.35, 0],
                 }),
                 transform: [
                   {
                     scale: ring2Anim.interpolate({
                       inputRange: [0, 1],
-                      outputRange: [0.85, 1.35],
+                      outputRange: [0.85, 1.4],
                     }),
                   },
                 ],
@@ -492,18 +507,20 @@ export function AnimatedMascot({ state = 'IDLE', onTap, size = 180 }: AnimatedMa
         style={[
           styles.ambientAura,
           {
-            width: size * 1.18,
-            height: size * 1.18,
-            borderRadius: (size * 1.18) / 2,
+            width: size * 1.25,
+            height: size * 1.25,
+            borderRadius: (size * 1.25) / 2,
             transform: [{ scale: auraScaleAnim }],
             backgroundColor:
               state === 'COMFORTING'
-                ? 'rgba(120, 178, 156, 0.28)'
+                ? 'rgba(120, 178, 156, 0.32)'
                 : state === 'LISTENING'
-                ? 'rgba(100, 210, 180, 0.25)'
+                ? 'rgba(100, 210, 180, 0.28)'
                 : state === 'THINKING'
-                ? 'rgba(140, 120, 220, 0.25)'
-                : 'rgba(110, 130, 220, 0.2)',
+                ? 'rgba(150, 130, 230, 0.28)'
+                : state === 'SPEAKING'
+                ? 'rgba(120, 178, 156, 0.35)'
+                : 'rgba(110, 130, 230, 0.22)',
           },
         ]}
       />
@@ -514,15 +531,15 @@ export function AnimatedMascot({ state = 'IDLE', onTap, size = 180 }: AnimatedMa
           styles.sparkleContainer,
           {
             opacity: sparkleOpacity,
-            transform: [{ rotate: floatAnim.interpolate({ inputRange: [-15, 0], outputRange: ['-5deg', '5deg'] }) }],
+            transform: [{ rotate: floatAnim.interpolate({ inputRange: [-15, 0], outputRange: ['-6deg', '6deg'] }) }],
           },
         ]}
         pointerEvents="none"
       >
-        <Sparkles size={16} color="#B8EEDA" style={[styles.sparkleItem, { top: 12, left: 24 }]} />
-        <Sparkles size={12} color="#D2E3DB" style={[styles.sparkleItem, { top: 28, right: 30 }]} />
-        <Sparkles size={14} color="#B8EEDA" style={[styles.sparkleItem, { bottom: 34, left: 32 }]} />
-        <Sparkles size={18} color="#9CD1BE" style={[styles.sparkleItem, { bottom: 22, right: 28 }]} />
+        <Sparkles size={18} color="#B8EEDA" style={[styles.sparkleItem, { top: 12, left: 24 }]} />
+        <Sparkles size={14} color="#D2E3DB" style={[styles.sparkleItem, { top: 28, right: 30 }]} />
+        <Sparkles size={16} color="#B8EEDA" style={[styles.sparkleItem, { bottom: 34, left: 32 }]} />
+        <Sparkles size={20} color="#9CD1BE" style={[styles.sparkleItem, { bottom: 22, right: 28 }]} />
       </Animated.View>
 
       {/* Central Interactive Mascot Button */}
@@ -530,7 +547,7 @@ export function AnimatedMascot({ state = 'IDLE', onTap, size = 180 }: AnimatedMa
         activeOpacity={0.92}
         onPress={handleTap}
         style={styles.touchTarget}
-        accessibilityLabel="Interactive Bloom Mascot"
+        accessibilityLabel="Interactive Bloom Cloud Mascot"
       >
         <Animated.View
           style={[
@@ -542,16 +559,16 @@ export function AnimatedMascot({ state = 'IDLE', onTap, size = 180 }: AnimatedMa
                 {
                   rotate: tiltAnim.interpolate({
                     inputRange: [-0.1, 0, 0.1],
-                    outputRange: ['-6deg', '0deg', '6deg'],
+                    outputRange: ['-7deg', '0deg', '7deg'],
                   }),
                 },
               ],
             },
           ]}
         >
-          {/* Feathered Cloud Mascot Image */}
+          {/* High-Resolution Mascot Image Frame */}
           <Image
-            source={require('../../assets/bloom-cloud-mascot-feathered.png')}
+            source={getMascotFrame()}
             style={[styles.mascotImage, { width: size, height: size }]}
             resizeMode="contain"
           />
@@ -589,7 +606,7 @@ const styles = StyleSheet.create({
     position: 'absolute',
     zIndex: 2,
     borderWidth: 1,
-    borderColor: 'rgba(184, 238, 218, 0.15)',
+    borderColor: 'rgba(184, 238, 218, 0.2)',
   },
   waveRing: {
     position: 'absolute',
@@ -606,17 +623,17 @@ const styles = StyleSheet.create({
   },
   speechBubble: {
     position: 'absolute',
-    top: -46,
+    top: -50,
     backgroundColor: '#1E2838',
     paddingHorizontal: 16,
     paddingVertical: 10,
     borderRadius: 20,
     zIndex: 30,
     borderWidth: 1,
-    borderColor: 'rgba(184, 238, 218, 0.25)',
+    borderColor: 'rgba(184, 238, 218, 0.28)',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.35,
+    shadowOpacity: 0.4,
     shadowRadius: 10,
     elevation: 8,
   },
@@ -642,27 +659,27 @@ const styles = StyleSheet.create({
   },
   statePill: {
     position: 'absolute',
-    bottom: -6,
+    bottom: -10,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    backgroundColor: 'rgba(23, 32, 48, 0.85)',
+    backgroundColor: 'rgba(23, 32, 48, 0.92)',
     paddingHorizontal: 14,
     paddingVertical: 6,
     borderRadius: 9999,
     borderWidth: 1,
-    borderColor: 'rgba(91, 142, 125, 0.25)',
+    borderColor: 'rgba(91, 142, 125, 0.3)',
     zIndex: 12,
   },
   statePillDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
+    width: 7,
+    height: 7,
+    borderRadius: 3.5,
   },
   statePillText: {
     ...Typography.caption,
     color: '#D2E3DB',
-    fontSize: 11,
-    fontWeight: '600',
+    fontSize: 12,
+    fontWeight: '700',
   },
 });
