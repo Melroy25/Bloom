@@ -9,6 +9,7 @@ import {
   Modal,
   TextInput,
   Dimensions,
+  ActivityIndicator,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
@@ -24,11 +25,13 @@ import {
   X,
   AlertCircle,
   Calendar,
+  GraduationCap,
 } from 'lucide-react-native';
 import { Colors } from '../../../constants/colors';
 import { Typography } from '../../../constants/typography';
 import { Spacing, BorderRadius } from '../../../constants/spacing';
 import { Shadows } from '../../../constants/shadows';
+import { useGoogleClassroom, ClassroomAssignmentItem } from '../../../hooks/useGoogleClassroom';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -41,6 +44,8 @@ interface AssignmentItem {
   dueDateLabel: string;
   estimatedHours: string;
   status: 'pending' | 'completed';
+  classroomLink?: string;
+  source?: 'google_classroom' | 'manual';
 }
 
 const INITIAL_ASSIGNMENTS: AssignmentItem[] = [
@@ -105,6 +110,20 @@ export default function AssignmentsScreen() {
   const [filter, setFilter] = useState<'pending' | 'completed'>('pending');
 
   const STORAGE_KEY = '@bloom_assignments_list';
+
+  // Google Classroom Integration Hook
+  const { syncGoogleClassroom, isLoading: isSyncing } = useGoogleClassroom(
+    (importedList) => {
+      if (!importedList || importedList.length === 0) return;
+      setAssignments((prev) => {
+        const existingIds = new Set(prev.map((a) => a.id));
+        const newItems = importedList.filter((item) => !existingIds.has(item.id));
+        const updated = [...newItems, ...prev];
+        AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(updated)).catch(() => {});
+        return updated;
+      });
+    }
+  );
 
   // Load persisted assignments on mount
   useEffect(() => {
@@ -204,9 +223,27 @@ export default function AssignmentsScreen() {
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
-        {/* ── Subheader Title Row ──────────────────────────────────────── */}
+        {/* ── Subheader Title Row & Google Classroom Sync ─────────────── */}
         <View style={styles.subheaderRow}>
           <Text style={styles.screenTitle}>Assignments</Text>
+          <TouchableOpacity
+            style={[styles.syncButton, isSyncing && styles.syncButtonDisabled]}
+            onPress={syncGoogleClassroom}
+            disabled={isSyncing}
+            activeOpacity={0.8}
+          >
+            {isSyncing ? (
+              <>
+                <ActivityIndicator size="small" color="#FFFFFF" />
+                <Text style={styles.syncButtonText}>Syncing...</Text>
+              </>
+            ) : (
+              <>
+                <GraduationCap size={15} color="#FFFFFF" strokeWidth={2.2} />
+                <Text style={styles.syncButtonText}>Sync Classroom</Text>
+              </>
+            )}
+          </TouchableOpacity>
         </View>
 
         {/* ── 1. Top Summary Banner ────────────────────────────────────── */}
@@ -262,8 +299,16 @@ export default function AssignmentsScreen() {
             <View key={item.id} style={[styles.assignmentCard, Shadows.sm]}>
               {/* Top Row: Course Code & Urgency Badge */}
               <View style={styles.cardTopRow}>
-                <View style={styles.coursePill}>
-                  <Text style={styles.coursePillText}>{item.courseCode}</Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                  <View style={styles.coursePill}>
+                    <Text style={styles.coursePillText}>{item.courseCode}</Text>
+                  </View>
+                  {item.source === 'google_classroom' && (
+                    <View style={styles.classroomBadge}>
+                      <GraduationCap size={11} color="#365B45" />
+                      <Text style={styles.classroomBadgeText}>Classroom</Text>
+                    </View>
+                  )}
                 </View>
 
                 <View
@@ -506,7 +551,42 @@ const styles = StyleSheet.create({
   },
 
   subheaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
     marginBottom: 14,
+  },
+  syncButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#365B45',
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: BorderRadius.round,
+    gap: 6,
+    ...Shadows.sm,
+  },
+  syncButtonDisabled: {
+    opacity: 0.7,
+  },
+  syncButtonText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#FFFFFF',
+  },
+  classroomBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#D9EEE5',
+    paddingHorizontal: 7,
+    paddingVertical: 2.5,
+    borderRadius: BorderRadius.round,
+    gap: 4,
+  },
+  classroomBadgeText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#365B45',
   },
   screenTitle: {
     fontSize: 26,
